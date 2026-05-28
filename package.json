@@ -1,0 +1,29 @@
+{
+  "name": "exeye",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0 --port 5173",
+    "dev:device": "EXEYE_DEVICE_HTTP=1 vite --host 0.0.0.0 --port 5173",
+    "build": "tsc && vite build",
+    "preview": "vite preview --host 0.0.0.0 --port 5173",
+    "simulator": "evenhub-simulator https://localhost:5173",
+    "simulator:device": "evenhub-simulator http://localhost:5173",
+    "qr": "node scripts/evenhub-qr.mjs --https",
+    "qr:device": "node scripts/evenhub-qr.mjs --http",
+    "whitelist:sync": "node scripts/sync-app-network-whitelist.mjs",
+    "pack": "npm run build && evenhub pack app.json dist -o dist/exeye.ehpk",
+    "evenhub:init": "evenhub init"
+  },
+  "dependencies": {
+    "@evenrealities/even_hub_sdk": "^0.0.10"
+  },
+  "devDependencies": {
+    "@evenrealities/evenhub-cli": "^0.1.13",
+    "@evenrealities/evenhub-simulator": "^0.7.3",
+    "@vitejs/plugin-basic-ssl": "^2.3.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.1"
+  }
+}

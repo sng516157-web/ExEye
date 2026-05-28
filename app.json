@@ -1,0 +1,19 @@
+{
+  "package_id": "com.exeye.g2",
+  "edition": "202601",
+  "name": "ExEye",
+  "version": "0.1.0",
+  "min_app_version": "2.0.0",
+  "min_sdk_version": "0.0.10",
+  "entrypoint": "index.html",
+  "permissions": [
+    {
+      "name": "network",
+      "desc": "Fetches collar-camera frames and sends them to the ExEye vision API for on-lens scene summaries.",
+      "whitelist": [
+        "https://api.yourdomain.com"
+      ]
+    }
+  ],
+  "supported_languages": ["en"]
+}

@@ -1,0 +1,147 @@
+import cors from "cors";
+import express from "express";
+import multer from "multer";
+import { readFileSync, existsSync } from "node:fs";
+import { resolve } from "node:path";
+import { captureMacWebcamJpeg } from "./macCamera.js";
+import {
+  analyseImage,
+  mockSummary,
+  resolveVisionConfig,
+  shortenErrorMessage,
+} from "./vision.js";
+
+loadEnvFile();
+
+const visionConfig = resolveVisionConfig();
+const MOCK_ON_AI_ERROR = process.env.MOCK_ON_AI_ERROR === "1";
+
+const app = express();
+const upload = multer({ storage: multer.memoryStorage() });
+
+const PORT = 3000;
+
+const DEFAULT_PROMPT =
+  "Describe only useful navigation-relevant visual information in 2–3 short sentences.";
+
+app.use(cors());
+
+app.get("/health", (_req, res) => {
+  res.json({
+    ok: true,
+    vision: visionConfig.provider,
+    model: visionConfig.model,
+    macCamera: "/camera/snapshot",
+  });
+});
+
+// Dev helper: Mac webcam as HTTP camera (for G2 + iPhone — WebView has no getUserMedia)
+app.get("/camera/snapshot", async (_req, res) => {
+  try {
+    const jpeg = await captureMacWebcamJpeg();
+    res.set("Content-Type", "image/jpeg");
+    res.set("Cache-Control", "no-store");
+    res.send(jpeg);
+  } catch (error) {
+    console.error("[ExEye] /camera/snapshot failed", error);
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "Webcam capture failed",
+    });
+  }
+});
+
+app.post("/analyse-frame", upload.single("image"), async (req, res) => {
+  if (!req.file) {
+    res.status(400).json({ error: "Missing image upload" });
+    return;
+  }
+
+  const prompt =
+    typeof req.body?.prompt === "string" && req.body.prompt.trim()
+      ? req.body.prompt.trim()
+      : DEFAULT_PROMPT;
+
+  try {
+    let summary: string;
+
+    if (visionConfig.provider === "mock") {
+      summary = mockSummary();
+    } else {
+      try {
+        summary = await analyseImage(
+          visionConfig,
+          req.file.buffer,
+          req.file.mimetype,
+          prompt
+        );
+      } catch (error) {
+        console.error(`[ExEye] ${visionConfig.provider} failed`, error);
+
+        if (MOCK_ON_AI_ERROR) {
+          summary = mockSummary();
+        } else {
+          throw error;
+        }
+      }
+    }
+
+    res.json({ summary });
+  } catch (error) {
+    console.error("[ExEye] analyse-frame failed", error);
+    const message =
+      error instanceof Error ? error.message : "Vision analysis failed";
+    res.status(500).json({
+      error: shortenErrorMessage(message),
+    });
+  }
+});
+
+app.listen(PORT, () => {
+  console.log(`ExEye vision backend listening on http://localhost:${PORT}`);
+  console.log(
+    `Vision: ${visionConfig.provider}${
+      visionConfig.model ? ` (${visionConfig.model})` : ""
+    }`
+  );
+
+  if (
+    visionConfig.provider !== "openai" &&
+    process.env.OPENAI_API_KEY?.trim()
+  ) {
+    console.warn(
+      "[ExEye] OPENAI_API_KEY is set but ignored (VISION_PROVIDER is not openai). Remove it to avoid confusion."
+    );
+  }
+});
+
+function loadEnvFile(): void {
+  const envPath = resolve(process.cwd(), ".env");
+  if (!existsSync(envPath)) {
+    return;
+  }
+
+  for (const line of readFileSync(envPath, "utf8").split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) {
+      continue;
+    }
+
+    const eq = trimmed.indexOf("=");
+    if (eq === -1) {
+      continue;
+    }
+
+    const key = trimmed.slice(0, eq).trim();
+    let value = trimmed.slice(eq + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+
+    if (!process.env[key]) {
+      process.env[key] = value;
+    }
+  }
+}
