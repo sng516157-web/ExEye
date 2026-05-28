@@ -14,7 +14,9 @@ Aligned with [Even Hub docs](https://hub.evenrealities.com/docs/getting-started/
 | 4. Package | `npm run pack` → `dist/exeye.ehpk` |
 | 5. Submit | Upload via Even Hub portal |
 
-Full guide: **[docs/EVEN_HUB_WORKFLOW.md](docs/EVEN_HUB_WORKFLOW.md)**
+Full guide: **[docs/EVEN_HUB_WORKFLOW.md](docs/EVEN_HUB_WORKFLOW.md)**  
+Cloud deploy (no sleep): **[docs/DEPLOY_CLOUDFLARE.md](docs/DEPLOY_CLOUDFLARE.md)**  
+Cloud deploy (Render): **[docs/DEPLOY_SERVER.md](docs/DEPLOY_SERVER.md)**
 
 ## First-time setup
 

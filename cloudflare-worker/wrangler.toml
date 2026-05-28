@@ -1,0 +1,8 @@
+name = "exeye-vision"
+main = "src/index.ts"
+compatibility_date = "2026-05-28"
+
+[vars]
+VISION_PROVIDER = "gemini"
+GEMINI_MODEL = "gemini-2.5-flash"
+MOCK_ON_AI_ERROR = "0"
