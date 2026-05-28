@@ -19,7 +19,7 @@ const MOCK_ON_AI_ERROR = process.env.MOCK_ON_AI_ERROR === "1";
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
 
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 const DEFAULT_PROMPT =
   "Describe only useful navigation-relevant visual information in 2–3 short sentences.";

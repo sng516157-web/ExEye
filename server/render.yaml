@@ -1,0 +1,16 @@
+# Render.com — connect repo, set root directory to /server or use this Blueprint
+services:
+  - type: web
+    name: exeye-vision
+    runtime: node
+    rootDir: server
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: VISION_PROVIDER
+        value: gemini
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
+      - key: GEMINI_API_KEY
+        sync: false
