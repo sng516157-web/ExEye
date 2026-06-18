@@ -3,7 +3,8 @@ import express from "express";
 import multer from "multer";
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { captureMacWebcamJpeg } from "./macCamera.js";
+import { captureWebcamJpeg } from "./webcamCapture.js";
+import { augmentVisionPrompt, stripMarkdownFormatting } from "./prompt.js";
 import {
   analyseImage,
   mockSummary,
@@ -35,10 +36,10 @@ app.get("/health", (_req, res) => {
   });
 });
 
-// Dev helper: Mac webcam as HTTP camera (for G2 + iPhone — WebView has no getUserMedia)
+// Dev helper: host machine webcam as HTTP camera (G2 + iPhone — WebView has no getUserMedia)
 app.get("/camera/snapshot", async (_req, res) => {
   try {
-    const jpeg = await captureMacWebcamJpeg();
+    const jpeg = await captureWebcamJpeg();
     res.set("Content-Type", "image/jpeg");
     res.set("Cache-Control", "no-store");
     res.send(jpeg);
@@ -56,10 +57,11 @@ app.post("/analyse-frame", upload.single("image"), async (req, res) => {
     return;
   }
 
-  const prompt =
+  const prompt = augmentVisionPrompt(
     typeof req.body?.prompt === "string" && req.body.prompt.trim()
       ? req.body.prompt.trim()
-      : DEFAULT_PROMPT;
+      : DEFAULT_PROMPT
+  );
 
   try {
     let summary: string;
@@ -85,7 +87,7 @@ app.post("/analyse-frame", upload.single("image"), async (req, res) => {
       }
     }
 
-    res.json({ summary });
+    res.json({ summary: stripMarkdownFormatting(summary) });
   } catch (error) {
     console.error("[ExEye] analyse-frame failed", error);
     const message =

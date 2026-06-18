@@ -19,6 +19,9 @@ export interface DisplayAdapter {
 
   showText(update: string | DisplayUpdate): Promise<void>;
 
+  /** Show the latest camera frame in the view finder (persists until replaced). */
+  showViewfinder?(image: Blob): Promise<void>;
+
   bindControls?(handlers: DisplayControls): void;
 
   shutdown?(): Promise<void>;

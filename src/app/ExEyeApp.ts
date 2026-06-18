@@ -3,7 +3,6 @@ import { WebcamCameraSource } from "../camera/WebcamCameraSource";
 import { EXEYE_CONFIG } from "../config";
 import { DisplayAdapter } from "../display/DisplayAdapter";
 import { EXEYE_STARTUP_TEXT } from "../display/EvenG2DisplayAdapter";
-import { truncateText } from "../utils/blob";
 import { VisionClient } from "../vision/VisionClient";
 
 const PROMPT_STORAGE_KEY = "exeye.visionPrompt";
@@ -66,6 +65,10 @@ export class ExEyeApp {
 
       const frame = await this.camera.captureFrame();
 
+      if (this.display.showViewfinder) {
+        await this.display.showViewfinder(frame);
+      }
+
       await this.display.showText({
         phase: "analysing",
         message: "Sending to vision AI…",
@@ -76,11 +79,9 @@ export class ExEyeApp {
         this.visionPrompt
       );
 
-      const clipped = truncateText(summary, EXEYE_CONFIG.maxSummaryChars);
-
       await this.display.showText({
         phase: "result",
-        message: clipped,
+        message: summary,
       });
     } catch (error) {
       await this.display.showText({

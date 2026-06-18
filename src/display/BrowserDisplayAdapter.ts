@@ -3,12 +3,18 @@ import "../ui/browser.css";
 import { bindPromptPanel, PROMPT_PANEL_HTML } from "../ui/promptPanel";
 import { DisplayAdapter, DisplayControls } from "./DisplayAdapter";
 import {
-  formatG2Body,
-  formatG2Header,
   normalizeDisplayUpdate,
+  phaseStatusHint,
   type DisplayPhase,
   type DisplayUpdate,
 } from "./displayUi";
+import { computeViewfinderLayout, renderG2LensMarkup } from "./g2Layout";
+import {
+  revokeViewfinderMirror,
+  updateLensMirror,
+  updateViewfinderMirror,
+} from "./lensMirror";
+import { readImageDimensions } from "../utils/g2Image";
 
 export class BrowserDisplayAdapter implements DisplayAdapter {
   name = "browser";
@@ -25,10 +31,7 @@ export class BrowserDisplayAdapter implements DisplayAdapter {
 
         <section class="exeye-g2-frame" aria-label="G2 display preview">
           <div class="exeye-g2-label">G2 lens preview</div>
-          <div class="exeye-g2-screen" id="exeye-screen" data-phase="ready">
-            <div class="exeye-g2-hdr" id="exeye-g2-hdr">ExEye · READY</div>
-            <div class="exeye-g2-body" id="exeye-g2-body">Starting…</div>
-          </div>
+          ${renderG2LensMarkup()}
         </section>
 
         ${PROMPT_PANEL_HTML}
@@ -55,38 +58,31 @@ export class BrowserDisplayAdapter implements DisplayAdapter {
   }
 
   async showText(input: string | DisplayUpdate): Promise<void> {
-    const { phase, message } = normalizeDisplayUpdate(input);
+    const update = normalizeDisplayUpdate(input);
 
-    const screen = document.getElementById("exeye-screen");
-    const hdr = document.getElementById("exeye-g2-hdr");
-    const body = document.getElementById("exeye-g2-body");
+    updateLensMirror(this.root, update);
+
     const label = document.getElementById("exeye-status-label");
     const dot = document.getElementById("exeye-dot");
 
-    if (screen) {
-      screen.setAttribute("data-phase", phase);
-    }
-
-    if (hdr) {
-      hdr.textContent = formatG2Header(phase);
-    }
-
-    if (body) {
-      body.textContent = formatG2Body(message);
-    }
-
     if (label) {
-      label.textContent = statusLabel(phase);
+      label.textContent = statusLabel(update.phase);
     }
 
     if (dot) {
       dot.className = "exeye-dot";
-      if (phase === "capturing" || phase === "analysing") {
+      if (update.phase === "capturing" || update.phase === "analysing") {
         dot.classList.add("exeye-dot--busy");
-      } else if (phase === "error") {
+      } else if (update.phase === "error") {
         dot.classList.add("exeye-dot--error");
       }
     }
+  }
+
+  async showViewfinder(image: Blob): Promise<void> {
+    const { width, height } = await readImageDimensions(image);
+    const layout = computeViewfinderLayout(width, height);
+    updateViewfinderMirror(this.root, image, layout);
   }
 
   bindControls(handlers: DisplayControls): void {
@@ -105,20 +101,12 @@ export class BrowserDisplayAdapter implements DisplayAdapter {
       bindPromptPanel(this.root, handlers.prompt);
     }
   }
+
+  async shutdown(): Promise<void> {
+    revokeViewfinderMirror();
+  }
 }
 
 function statusLabel(phase: DisplayPhase): string {
-  switch (phase) {
-    case "capturing":
-      return "Capturing frame…";
-    case "analysing":
-      return "Analysing scene…";
-    case "error":
-      return "Error";
-    case "result":
-      return "Scene summary";
-    case "ready":
-    default:
-      return "Ready — tap or press Analyse";
-  }
+  return phaseStatusHint(phase);
 }

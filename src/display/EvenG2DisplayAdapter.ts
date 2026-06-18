@@ -1,6 +1,10 @@
 import {
   CreateStartUpPageContainer,
+  ImageContainerProperty,
+  ImageRawDataUpdate,
+  ImageRawDataUpdateResult,
   OsEventTypeList,
+  RebuildPageContainer,
   TextContainerProperty,
   TextContainerUpgrade,
   waitForEvenAppBridge,
@@ -16,19 +20,45 @@ import {
   formatG2Body,
   formatG2Header,
   normalizeDisplayUpdate,
+  phaseStatusHint,
   type DisplayPhase,
   type DisplayUpdate,
 } from "./displayUi";
+import {
+  computeViewfinderLayout,
+  G2_LAYOUT,
+  G2_VF_LABEL,
+  renderG2LensMarkup,
+  VF_FRAME_PAD,
+  type ViewfinderLayout,
+} from "./g2Layout";
+import {
+  revokeViewfinderMirror,
+  updateLensMirror,
+  updateViewfinderMirror,
+} from "./lensMirror";
+import { clampG2Text } from "../utils/markdown";
+import {
+  prepareG2ImageBytes,
+  readImageDimensions,
+} from "../utils/g2Image";
 
 export const EXEYE_STARTUP_TEXT: DisplayUpdate = {
   phase: "ready",
-  message: "Set prompt on phone\nTap to analyse\nDouble-tap exit",
+  message: "Tap to analyse\nDouble-tap exit",
 };
 
-const HDR_ID = 1;
-const HDR_NAME = "exeye-hdr";
-const BODY_ID = 2;
-const BODY_NAME = "exeye-body";
+const STATUS_ID = 1;
+const STATUS_NAME = "exeye-status";
+const VF_LABEL_ID = 2;
+const VF_LABEL_NAME = "exeye-vf-lbl";
+const VF_FRAME_ID = 3;
+const VF_FRAME_NAME = "exeye-vf-frame";
+const VF_IMAGE_ID = 4;
+const VF_IMAGE_NAME = "exeye-vf-img";
+
+/** Placeholder 4:3 frame shown before the first capture. */
+const PLACEHOLDER_VF_LAYOUT = computeViewfinderLayout(160, 120);
 
 export class EvenG2DisplayAdapter implements DisplayAdapter {
   name = "even-g2";
@@ -36,6 +66,8 @@ export class EvenG2DisplayAdapter implements DisplayAdapter {
   private bridge?: EvenAppBridge;
   private unsubscribe?: () => void;
   private handlers?: DisplayControls;
+  private imageQueue: Promise<void> = Promise.resolve();
+  private statusContent = "";
 
   constructor(private readonly phoneRoot?: HTMLElement) {}
 
@@ -50,34 +82,17 @@ export class EvenG2DisplayAdapter implements DisplayAdapter {
   async init(): Promise<void> {
     this.bridge = await waitForEvenAppBridge();
 
-    const header = new TextContainerProperty({
-      containerID: HDR_ID,
-      containerName: HDR_NAME,
-      content: formatG2Header("ready"),
-      xPosition: 8,
-      yPosition: 4,
-      width: 560,
-      height: 32,
-      borderWidth: 0,
-      isEventCapture: 0,
-    });
+    this.statusContent = clampG2Text(
+      `${formatG2Header()}\n${formatG2Body(EXEYE_STARTUP_TEXT.message)}`
+    );
 
-    const body = new TextContainerProperty({
-      containerID: BODY_ID,
-      containerName: BODY_NAME,
-      content: formatG2Body(EXEYE_STARTUP_TEXT.message),
-      xPosition: 8,
-      yPosition: 40,
-      width: 560,
-      height: 244,
-      borderWidth: 0,
-      isEventCapture: 1,
-    });
+    const page = buildPageContainers(this.statusContent, PLACEHOLDER_VF_LAYOUT);
 
     const result = await this.bridge.createStartUpPageContainer(
       new CreateStartUpPageContainer({
-        containerTotalNum: 2,
-        textObject: [header, body],
+        containerTotalNum: 4,
+        textObject: page.textObject,
+        imageObject: page.imageObject,
       })
     );
 
@@ -99,38 +114,93 @@ export class EvenG2DisplayAdapter implements DisplayAdapter {
 
   async showText(input: string | DisplayUpdate): Promise<void> {
     const update = normalizeDisplayUpdate(input);
+    this.statusContent = clampG2Text(
+      `${formatG2Header()}\n${formatG2Body(update.message)}`
+    );
 
     if (!this.bridge) {
       throw new Error("EvenHub bridge not initialised");
     }
 
-    await Promise.all([
-      this.bridge.textContainerUpgrade(
-        new TextContainerUpgrade({
-          containerID: HDR_ID,
-          containerName: HDR_NAME,
-          contentOffset: 0,
-          contentLength: 64,
-          content: formatG2Header(update.phase),
-        })
-      ),
-      this.bridge.textContainerUpgrade(
-        new TextContainerUpgrade({
-          containerID: BODY_ID,
-          containerName: BODY_NAME,
-          contentOffset: 0,
-          contentLength: 2000,
-          content: formatG2Body(update.message),
-        })
-      ),
-    ]);
+    await this.bridge.textContainerUpgrade(
+      new TextContainerUpgrade({
+        containerID: STATUS_ID,
+        containerName: STATUS_NAME,
+        contentOffset: 0,
+        contentLength: this.statusContent.length,
+        content: this.statusContent,
+      })
+    );
 
     this.updatePhoneMirror(update);
+  }
+
+  async showViewfinder(image: Blob): Promise<void> {
+    let layout: ViewfinderLayout;
+
+    try {
+      const { width, height } = await readImageDimensions(image);
+      layout = computeViewfinderLayout(width, height);
+    } catch (error) {
+      console.error("[ExEye] viewfinder layout failed", error);
+      return;
+    }
+
+    if (this.phoneRoot) {
+      updateViewfinderMirror(this.phoneRoot, image, layout);
+    }
+
+    if (!this.bridge) {
+      return;
+    }
+
+    let bytes: Uint8Array;
+    try {
+      bytes = await prepareG2ImageBytes(
+        image,
+        layout.image.width,
+        layout.image.height
+      );
+    } catch (error) {
+      console.error("[ExEye] viewfinder image prepare failed", error);
+      return;
+    }
+
+    const page = buildPageContainers(this.statusContent, layout);
+    const rebuilt = await this.bridge.rebuildPageContainer(
+      new RebuildPageContainer({
+        containerTotalNum: 4,
+        textObject: page.textObject,
+        imageObject: page.imageObject,
+      })
+    );
+
+    if (!rebuilt) {
+      console.warn("[ExEye] G2 viewfinder page rebuild failed");
+      return;
+    }
+
+    this.imageQueue = this.imageQueue.then(async () => {
+      const result = await this.bridge!.updateImageRawData(
+        new ImageRawDataUpdate({
+          containerID: VF_IMAGE_ID,
+          containerName: VF_IMAGE_NAME,
+          imageData: bytes,
+        })
+      );
+
+      if (result !== ImageRawDataUpdateResult.success) {
+        console.warn("[ExEye] G2 viewfinder upload failed:", result);
+      }
+    });
+
+    await this.imageQueue;
   }
 
   async shutdown(): Promise<void> {
     this.unsubscribe?.();
     this.unsubscribe = undefined;
+    revokeViewfinderMirror();
 
     if (this.bridge) {
       await this.bridge.shutDownPageContainer(0);
@@ -151,10 +221,7 @@ export class EvenG2DisplayAdapter implements DisplayAdapter {
 
         <section class="exeye-g2-frame" aria-label="On-lens display">
           <div class="exeye-g2-label">On your glasses now</div>
-          <div class="exeye-g2-screen" id="exeye-screen" data-phase="ready">
-            <div class="exeye-g2-hdr" id="exeye-g2-hdr">ExEye · READY</div>
-            <div class="exeye-g2-body" id="exeye-g2-body"></div>
-          </div>
+          ${renderG2LensMarkup()}
         </section>
 
         ${PROMPT_PANEL_HTML}
@@ -177,21 +244,10 @@ export class EvenG2DisplayAdapter implements DisplayAdapter {
       return;
     }
 
-    const screen = this.phoneRoot.querySelector("#exeye-screen");
-    const hdr = this.phoneRoot.querySelector("#exeye-g2-hdr");
-    const body = this.phoneRoot.querySelector("#exeye-g2-body");
+    updateLensMirror(this.phoneRoot, update);
+
     const label = this.phoneRoot.querySelector("#exeye-status-label");
     const dot = this.phoneRoot.querySelector("#exeye-dot");
-
-    screen?.setAttribute("data-phase", update.phase);
-
-    if (hdr) {
-      hdr.textContent = formatG2Header(update.phase);
-    }
-
-    if (body) {
-      body.textContent = formatG2Body(update.message);
-    }
 
     if (label) {
       label.textContent = phoneStatusLabel(update.phase);
@@ -224,19 +280,70 @@ export class EvenG2DisplayAdapter implements DisplayAdapter {
   }
 }
 
+function buildPageContainers(
+  statusContent: string,
+  vfLayout: ViewfinderLayout
+): {
+  textObject: TextContainerProperty[];
+  imageObject: ImageContainerProperty[];
+} {
+  const status = new TextContainerProperty({
+    containerID: STATUS_ID,
+    containerName: STATUS_NAME,
+    content: statusContent,
+    xPosition: G2_LAYOUT.status.x,
+    yPosition: G2_LAYOUT.status.y,
+    width: G2_LAYOUT.status.width,
+    height: G2_LAYOUT.status.height,
+    borderWidth: 0,
+    isEventCapture: 1,
+  });
+
+  const vfLabel = new TextContainerProperty({
+    containerID: VF_LABEL_ID,
+    containerName: VF_LABEL_NAME,
+    content: G2_VF_LABEL,
+    xPosition: G2_LAYOUT.vfLabel.x,
+    yPosition: G2_LAYOUT.vfLabel.y,
+    width: G2_LAYOUT.vfLabel.width,
+    height: G2_LAYOUT.vfLabel.height,
+    borderWidth: 0,
+    paddingLength: 0,
+    isEventCapture: 0,
+  });
+
+  const vfFrame = new TextContainerProperty({
+    containerID: VF_FRAME_ID,
+    containerName: VF_FRAME_NAME,
+    content: " ",
+    xPosition: vfLayout.frame.x,
+    yPosition: vfLayout.frame.y,
+    width: vfLayout.frame.width,
+    height: vfLayout.frame.height,
+    borderWidth: 1,
+    borderColor: 12,
+    borderRadius: 2,
+    paddingLength: VF_FRAME_PAD,
+    isEventCapture: 0,
+  });
+
+  const vfImage = new ImageContainerProperty({
+    containerID: VF_IMAGE_ID,
+    containerName: VF_IMAGE_NAME,
+    xPosition: vfLayout.image.x,
+    yPosition: vfLayout.image.y,
+    width: vfLayout.image.width,
+    height: vfLayout.image.height,
+  });
+
+  return {
+    textObject: [status, vfLabel, vfFrame],
+    imageObject: [vfImage],
+  };
+}
+
 function phoneStatusLabel(phase: DisplayPhase): string {
-  switch (phase) {
-    case "capturing":
-      return "Capturing…";
-    case "analysing":
-      return "Analysing…";
-    case "error":
-      return "Error";
-    case "result":
-      return "Latest view";
-    default:
-      return "Ready";
-  }
+  return phaseStatusHint(phase);
 }
 
 function getRawEventType(event: EvenHubEvent): unknown {

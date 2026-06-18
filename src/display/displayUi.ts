@@ -1,3 +1,6 @@
+import { G2_STATUS_HEADER, G2_STATUS_WRAP_WIDTH } from "./g2Layout";
+import { stripMarkdownFormatting } from "../utils/markdown";
+
 export type DisplayPhase =
   | "ready"
   | "capturing"
@@ -21,19 +24,26 @@ export function normalizeDisplayUpdate(
 }
 
 const PHASE_LABEL: Record<DisplayPhase, string> = {
-  ready: "READY",
-  capturing: "CAPTURE",
-  analysing: "ANALYSE",
-  result: "VIEW",
-  error: "ERROR",
+  ready: "Ready",
+  capturing: "Capturing…",
+  analysing: "Analysing…",
+  result: "Latest view",
+  error: "Error",
 };
 
-export function formatG2Header(phase: DisplayPhase): string {
-  return `ExEye · ${PHASE_LABEL[phase]}`;
+export function formatG2Header(_phase?: DisplayPhase): string {
+  return G2_STATUS_HEADER;
 }
 
-export function formatG2Body(message: string, maxWidth = 48): string {
-  return wrapText(message.trim(), maxWidth);
+export function phaseStatusHint(phase: DisplayPhase): string {
+  return PHASE_LABEL[phase];
+}
+
+export function formatG2Body(
+  message: string,
+  maxWidth = G2_STATUS_WRAP_WIDTH
+): string {
+  return wrapText(stripMarkdownFormatting(message.trim()), maxWidth);
 }
 
 export function phaseFromLegacyMessage(message: string): DisplayPhase {
@@ -59,26 +69,40 @@ export function phaseFromLegacyMessage(message: string): DisplayPhase {
 }
 
 function wrapText(text: string, maxWidth: number): string {
-  const words = text.split(/\s+/).filter(Boolean);
   const lines: string[] = [];
-  let line = "";
 
-  for (const word of words) {
-    const next = line ? `${line} ${word}` : word;
+  for (const paragraph of text.split("\n")) {
+    const words = paragraph.split(/\s+/).filter(Boolean);
+    let line = "";
 
-    if (next.length <= maxWidth) {
-      line = next;
-    } else {
-      if (line) {
-        lines.push(line);
+    for (const word of words) {
+      if (word.length > maxWidth) {
+        if (line) {
+          lines.push(line);
+          line = "";
+        }
+
+        for (let i = 0; i < word.length; i += maxWidth) {
+          lines.push(word.slice(i, i + maxWidth));
+        }
+        continue;
       }
 
-      line = word.length > maxWidth ? word.slice(0, maxWidth) : word;
-    }
-  }
+      const next = line ? `${line} ${word}` : word;
 
-  if (line) {
-    lines.push(line);
+      if (next.length <= maxWidth) {
+        line = next;
+      } else {
+        if (line) {
+          lines.push(line);
+        }
+        line = word;
+      }
+    }
+
+    if (line) {
+      lines.push(line);
+    }
   }
 
   return lines.join("\n") || text;

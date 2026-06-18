@@ -44,6 +44,4 @@ export const EXEYE_CONFIG = {
   periodicScanEnabled: false,
 
   periodicScanMs: 3000,
-
-  maxSummaryChars: 500,
 };

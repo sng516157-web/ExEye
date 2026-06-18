@@ -1,3 +1,8 @@
+import {
+  augmentVisionPrompt,
+  stripMarkdownFormatting,
+} from "../utils/markdown";
+
 export class VisionClient {
   constructor(private readonly endpoint: string) {}
 
@@ -5,7 +10,7 @@ export class VisionClient {
     const formData = new FormData();
 
     formData.append("image", image, "frame.jpg");
-    formData.append("prompt", prompt.trim());
+    formData.append("prompt", augmentVisionPrompt(prompt));
 
     const response = await fetch(this.endpoint, {
       method: "POST",
@@ -36,6 +41,6 @@ export class VisionClient {
       throw new Error("Vision backend returned empty summary");
     }
 
-    return summary;
+    return stripMarkdownFormatting(summary);
   }
 }
