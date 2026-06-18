@@ -1,10 +1,127 @@
-import { execFile } from "node:child_process";
-import { platform } from "node:os";
+import { execFile, execFileSync } from "node:child_process";
+import { existsSync, readdirSync } from "node:fs";
+import { homedir, platform } from "node:os";
+import { join } from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
-const FFMPEG = process.env.FFMPEG_PATH?.trim() || "ffmpeg";
+let ffmpegPath: string | undefined;
+
+function resolveFfmpegPath(): string {
+  if (ffmpegPath) {
+    return ffmpegPath;
+  }
+
+  const fromEnv = process.env.FFMPEG_PATH?.trim();
+  if (fromEnv && existsSync(fromEnv)) {
+    ffmpegPath = fromEnv;
+    return ffmpegPath;
+  }
+
+  if (platform() === "win32") {
+    const fromWhere = findFfmpegWithWhere();
+    if (fromWhere) {
+      ffmpegPath = fromWhere;
+      return ffmpegPath;
+    }
+
+    const fromWinget = findWingetFfmpeg();
+    if (fromWinget) {
+      ffmpegPath = fromWinget;
+      return ffmpegPath;
+    }
+  }
+
+  ffmpegPath = "ffmpeg";
+  return ffmpegPath;
+}
+
+function findFfmpegWithWhere(): string | null {
+  try {
+    const output = execFileSync("where.exe", ["ffmpeg"], {
+      encoding: "utf8",
+      windowsHide: true,
+    }).trim();
+
+    const first = output.split(/\r?\n/).find((line) => line.trim().length > 0);
+    if (first && existsSync(first.trim())) {
+      return first.trim();
+    }
+  } catch {
+    // where.exe failed — try other discovery methods
+  }
+
+  return null;
+}
+
+function findWingetFfmpeg(): string | null {
+  const packagesDir = join(
+    homedir(),
+    "AppData",
+    "Local",
+    "Microsoft",
+    "WinGet",
+    "Packages"
+  );
+
+  if (!existsSync(packagesDir)) {
+    return null;
+  }
+
+  for (const pkg of readdirSync(packagesDir)) {
+    if (!pkg.toLowerCase().includes("ffmpeg")) {
+      continue;
+    }
+
+    const candidate = join(packagesDir, pkg);
+    const found = findFileNamed(candidate, "ffmpeg.exe", 5);
+    if (found) {
+      return found;
+    }
+  }
+
+  return null;
+}
+
+function findFileNamed(
+  dir: string,
+  fileName: string,
+  maxDepth: number
+): string | null {
+  if (maxDepth < 0 || !existsSync(dir)) {
+    return null;
+  }
+
+  let entries: string[];
+  try {
+    entries = readdirSync(dir, { withFileTypes: true }).map((entry) =>
+      entry.isDirectory() ? `${entry.name}/` : entry.name
+    );
+  } catch {
+    return null;
+  }
+
+  for (const entry of entries) {
+    if (entry === fileName) {
+      const full = join(dir, entry);
+      return existsSync(full) ? full : null;
+    }
+  }
+
+  for (const entry of entries) {
+    if (!entry.endsWith("/")) {
+      continue;
+    }
+
+    const found = findFileNamed(join(dir, entry.slice(0, -1)), fileName, maxDepth - 1);
+    if (found) {
+      return found;
+    }
+  }
+
+  return null;
+}
 
 /** Capture one JPEG frame from the dev machine webcam via ffmpeg. */
 export async function captureWebcamJpeg(): Promise<Buffer> {
@@ -53,11 +170,12 @@ async function captureWindowsWebcamJpeg(): Promise<Buffer> {
 }
 
 async function detectWindowsCameraDevice(): Promise<string> {
+  const ffmpeg = resolveFfmpegPath();
   let output = "";
 
   try {
     const { stderr } = await execFileAsync(
-      FFMPEG,
+      ffmpeg,
       ["-hide_banner", "-list_devices", "true", "-f", "dshow", "-i", "dummy"],
       { encoding: "utf8", maxBuffer: 2 * 1024 * 1024 }
     );
@@ -102,9 +220,11 @@ function parseDshowVideoDevices(output: string): string[] {
 }
 
 async function runFfmpegSnapshot(inputArgs: string[]): Promise<Buffer> {
+  const ffmpeg = resolveFfmpegPath();
+
   try {
     const { stdout } = await execFileAsync(
-      FFMPEG,
+      ffmpeg,
       [
         "-hide_banner",
         "-loglevel",

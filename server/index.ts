@@ -5,6 +5,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { captureWebcamJpeg } from "./webcamCapture.js";
 import { augmentVisionPrompt, stripMarkdownFormatting } from "./prompt.js";
+import { resolveSttProvider, transcribeAudio } from "./stt.js";
 import {
   analyseImage,
   mockSummary,
@@ -32,6 +33,8 @@ app.get("/health", (_req, res) => {
     ok: true,
     vision: visionConfig.provider,
     model: visionConfig.model,
+    visionFallback: visionConfig.fallback?.provider ?? null,
+    speech: resolveSttProvider(),
     macCamera: "/camera/snapshot",
   });
 });
@@ -47,6 +50,25 @@ app.get("/camera/snapshot", async (_req, res) => {
     console.error("[ExEye] /camera/snapshot failed", error);
     res.status(500).json({
       error: error instanceof Error ? error.message : "Webcam capture failed",
+    });
+  }
+});
+
+app.post("/transcribe-prompt", upload.single("audio"), async (req, res) => {
+  if (!req.file?.buffer?.length) {
+    res.status(400).json({ error: "Missing audio upload" });
+    return;
+  }
+
+  try {
+    const transcript = await transcribeAudio(req.file.buffer);
+    res.json({ transcript: transcript.trim() });
+  } catch (error) {
+    console.error("[ExEye] /transcribe-prompt failed", error);
+    const message =
+      error instanceof Error ? error.message : "Speech transcription failed";
+    res.status(500).json({
+      error: shortenErrorMessage(message),
     });
   }
 });
@@ -100,18 +122,22 @@ app.post("/analyse-frame", upload.single("image"), async (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`ExEye vision backend listening on http://localhost:${PORT}`);
+  const fallback = visionConfig.fallback
+    ? ` · fallback: ${visionConfig.fallback.provider} (${visionConfig.fallback.model})`
+    : "";
   console.log(
     `Vision: ${visionConfig.provider}${
       visionConfig.model ? ` (${visionConfig.model})` : ""
-    }`
+    }${fallback}`
   );
+  console.log(`Speech: ${resolveSttProvider()} at POST /transcribe-prompt`);
 
   if (
     visionConfig.provider !== "openai" &&
     process.env.OPENAI_API_KEY?.trim()
   ) {
     console.warn(
-      "[ExEye] OPENAI_API_KEY is set but ignored (VISION_PROVIDER is not openai). Remove it to avoid confusion."
+      "[ExEye] OPENAI_API_KEY is set but ignored (VISION_PROVIDER is not openai)."
     );
   }
 });

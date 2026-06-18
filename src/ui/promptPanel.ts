@@ -6,7 +6,7 @@ export const PROMPT_PANEL_HTML = `
       Custom prompt
     </label>
     <p class="exeye-prompt-hint">
-      Set this on your phone before you tap the temple or ring to analyse.
+      Tap temple/ring to speak a prompt, or type one and use Analyse / Speak below.
     </p>
     <textarea
       id="exeye-prompt"
@@ -14,9 +14,19 @@ export const PROMPT_PANEL_HTML = `
       rows="4"
       spellcheck="true"
     ></textarea>
-    <button type="button" class="exeye-btn" id="exeye-prompt-apply">
-      Save prompt
-    </button>
+    <div class="exeye-prompt-actions">
+      <button type="button" class="exeye-btn" id="exeye-prompt-apply">
+        Save prompt
+      </button>
+      <button
+        type="button"
+        class="exeye-btn exeye-btn--voice"
+        id="exeye-prompt-voice"
+        aria-pressed="false"
+      >
+        Speak prompt
+      </button>
+    </div>
     <p class="exeye-prompt-status" id="exeye-prompt-status" aria-live="polite"></p>
   </section>
 `;
@@ -27,6 +37,7 @@ export function bindPromptPanel(
 ): void {
   const textarea = root.querySelector("#exeye-prompt");
   const applyBtn = root.querySelector("#exeye-prompt-apply");
+  const voiceBtn = root.querySelector("#exeye-prompt-voice");
   const status = root.querySelector("#exeye-prompt-status");
 
   if (!(textarea instanceof HTMLTextAreaElement)) {
@@ -38,11 +49,48 @@ export function bindPromptPanel(
   const apply = () => {
     controls.setPrompt(textarea.value);
     if (status) {
-      status.textContent = "Prompt saved — tap temple/ring to analyse.";
+      status.textContent = "Prompt saved — tap Analyse or speak via temple/ring.";
+    }
+  };
+
+  const setVoiceUi = (listening: boolean) => {
+    if (!(voiceBtn instanceof HTMLButtonElement)) {
+      return;
+    }
+
+    voiceBtn.disabled = listening;
+    voiceBtn.setAttribute("aria-pressed", listening ? "true" : "false");
+    voiceBtn.textContent = listening ? "Listening…" : "Speak prompt";
+
+    if (status) {
+      status.textContent = listening
+        ? "Speak now — your words appear on the glasses."
+        : "";
     }
   };
 
   applyBtn?.addEventListener("click", apply);
+
+  voiceBtn?.addEventListener("click", () => {
+    if (controls.isVoiceListening?.()) {
+      return;
+    }
+
+    controls.startVoicePrompt?.();
+    setVoiceUi(true);
+
+    const poll = window.setInterval(() => {
+      if (!controls.isVoiceListening?.()) {
+        window.clearInterval(poll);
+        setVoiceUi(false);
+        textarea.value = controls.getPrompt();
+      }
+    }, 200);
+  });
+
+  if (!controls.startVoicePrompt) {
+    voiceBtn?.setAttribute("hidden", "");
+  }
 
   textarea.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {

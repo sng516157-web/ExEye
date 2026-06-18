@@ -17,8 +17,7 @@ import "../ui/browser.css";
 import { bindPromptPanel, PROMPT_PANEL_HTML } from "../ui/promptPanel";
 import { DisplayAdapter, DisplayControls } from "./DisplayAdapter";
 import {
-  formatG2Body,
-  formatG2Header,
+  formatG2StatusContent,
   normalizeDisplayUpdate,
   phaseStatusHint,
   type DisplayPhase,
@@ -37,15 +36,18 @@ import {
   updateLensMirror,
   updateViewfinderMirror,
 } from "./lensMirror";
-import { clampG2Text } from "../utils/markdown";
+import {
+  clampG2Text,
+} from "../utils/markdown";
 import {
   prepareG2ImageBytes,
   readImageDimensions,
 } from "../utils/g2Image";
+import { resolveInputEventType } from "./evenHubInput";
 
 export const EXEYE_STARTUP_TEXT: DisplayUpdate = {
   phase: "ready",
-  message: "Tap to analyse\nDouble-tap exit",
+  message: "Tap to speak\nDouble-tap exit",
 };
 
 const STATUS_ID = 1;
@@ -77,13 +79,25 @@ export class EvenG2DisplayAdapter implements DisplayAdapter {
     if (this.phoneRoot && handlers.prompt) {
       bindPromptPanel(this.phoneRoot, handlers.prompt);
     }
+
+    this.ensureEventSubscription();
+  }
+
+  private ensureEventSubscription(): void {
+    if (this.unsubscribe || !this.bridge) {
+      return;
+    }
+
+    this.unsubscribe = this.bridge.onEvenHubEvent((event) => {
+      void this.handleEvent(event);
+    });
   }
 
   async init(): Promise<void> {
     this.bridge = await waitForEvenAppBridge();
 
     this.statusContent = clampG2Text(
-      `${formatG2Header()}\n${formatG2Body(EXEYE_STARTUP_TEXT.message)}`
+      formatG2StatusContent(EXEYE_STARTUP_TEXT)
     );
 
     const page = buildPageContainers(this.statusContent, PLACEHOLDER_VF_LAYOUT);
@@ -102,10 +116,6 @@ export class EvenG2DisplayAdapter implements DisplayAdapter {
       );
     }
 
-    this.unsubscribe = this.bridge.onEvenHubEvent((event) => {
-      void this.handleEvent(event);
-    });
-
     if (this.phoneRoot) {
       this.renderPhoneShell();
       await this.showText(EXEYE_STARTUP_TEXT);
@@ -114,9 +124,7 @@ export class EvenG2DisplayAdapter implements DisplayAdapter {
 
   async showText(input: string | DisplayUpdate): Promise<void> {
     const update = normalizeDisplayUpdate(input);
-    this.statusContent = clampG2Text(
-      `${formatG2Header()}\n${formatG2Body(update.message)}`
-    );
+    this.statusContent = clampG2Text(formatG2StatusContent(update));
 
     if (!this.bridge) {
       throw new Error("EvenHub bridge not initialised");
@@ -233,7 +241,7 @@ export class EvenG2DisplayAdapter implements DisplayAdapter {
 
         <p class="exeye-hint">
           Camera: <strong>${EXEYE_CONFIG.cameraMode}</strong>.
-          Save your prompt above, then tap temple or ring to analyse. Double-tap to exit.
+          Tap temple or ring to speak your prompt. Use Analyse below for a typed prompt. Double-tap to exit.
         </p>
       </div>
     `;
@@ -255,8 +263,16 @@ export class EvenG2DisplayAdapter implements DisplayAdapter {
 
     if (dot) {
       dot.className = "exeye-dot";
-      if (update.phase === "capturing" || update.phase === "analysing") {
-        dot.classList.add("exeye-dot--busy");
+      if (
+        update.phase === "listening" ||
+        update.phase === "capturing" ||
+        update.phase === "analysing"
+      ) {
+        dot.classList.add(
+          update.phase === "listening"
+            ? "exeye-dot--listening"
+            : "exeye-dot--busy"
+        );
       } else if (update.phase === "error") {
         dot.classList.add("exeye-dot--error");
       }
@@ -264,18 +280,32 @@ export class EvenG2DisplayAdapter implements DisplayAdapter {
   }
 
   private async handleEvent(event: EvenHubEvent): Promise<void> {
-    const eventType = normalizeEventType(getRawEventType(event));
+    // Mic PCM chunks arrive as audioEvent — must not be treated as temple taps.
+    if (event.audioEvent) {
+      return;
+    }
+
+    if (this.handlers?.isVoiceListening?.() || this.handlers?.isAnalysing?.()) {
+      return;
+    }
+
+    const eventType = resolveInputEventType(event);
+
+    if (import.meta.env.DEV && eventType === undefined) {
+      console.debug("[ExEye] unhandled EvenHub event", event);
+    }
 
     if (eventType === OsEventTypeList.DOUBLE_CLICK_EVENT) {
       await this.handlers?.onExit?.();
       return;
     }
 
-    if (
-      eventType === OsEventTypeList.CLICK_EVENT ||
-      eventType === undefined
-    ) {
-      this.handlers?.onAnalyse();
+    if (eventType === OsEventTypeList.CLICK_EVENT) {
+      if (this.handlers?.onVoicePrompt) {
+        this.handlers.onVoicePrompt();
+      } else {
+        this.handlers?.onAnalyse();
+      }
     }
   }
 }
@@ -344,52 +374,4 @@ function buildPageContainers(
 
 function phoneStatusLabel(phase: DisplayPhase): string {
   return phaseStatusHint(phase);
-}
-
-function getRawEventType(event: EvenHubEvent): unknown {
-  const e = event as Record<string, unknown>;
-  const listEvt = e.listEvent as Record<string, unknown> | undefined;
-  const textEvt = e.textEvent as Record<string, unknown> | undefined;
-  const sysEvt = e.sysEvent as Record<string, unknown> | undefined;
-
-  const fromTyped =
-    listEvt?.eventType ??
-    listEvt?.EventType ??
-    textEvt?.eventType ??
-    textEvt?.EventType;
-
-  if (fromTyped !== undefined && fromTyped !== null) {
-    return fromTyped;
-  }
-
-  if (sysEvt !== undefined && sysEvt !== null) {
-    const fromSys = sysEvt.eventType ?? sysEvt.EventType;
-    if (fromSys !== undefined && fromSys !== null) {
-      return fromSys;
-    }
-    return OsEventTypeList.CLICK_EVENT;
-  }
-
-  return e.eventType ?? e.EventType;
-}
-
-function normalizeEventType(rawEventType: unknown): number | undefined {
-  if (typeof rawEventType === "number") {
-    if (rawEventType >= 0 && rawEventType <= 8) {
-      return rawEventType;
-    }
-    return undefined;
-  }
-
-  if (typeof rawEventType === "string") {
-    const value = rawEventType.toUpperCase();
-    if (value.includes("DOUBLE")) {
-      return OsEventTypeList.DOUBLE_CLICK_EVENT;
-    }
-    if (value.includes("CLICK")) {
-      return OsEventTypeList.CLICK_EVENT;
-    }
-  }
-
-  return undefined;
 }

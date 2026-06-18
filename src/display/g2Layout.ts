@@ -17,7 +17,7 @@ export const VF_FRAME_PAD = 4;
 /** Even Hub ImageContainerProperty limits. */
 export const VF_IMAGE_MAX = { width: 244, height: 144 } as const;
 
-export const G2_STATUS_HEADER = "ExEye · Status";
+export const G2_MODE_PREFIX = "ExEye ·";
 export const G2_VF_LABEL = "ExEye View Finder";
 
 export const G2_VF_PLACEHOLDER =
@@ -65,7 +65,8 @@ export function renderG2LensMarkup(): string {
   return `
     <div class="exeye-lens" id="exeye-screen" data-phase="ready">
       <div class="exeye-lens__status-col">
-        <div class="exeye-lens__hdr" id="exeye-g2-hdr">${G2_STATUS_HEADER}</div>
+        <div class="exeye-lens__hdr" id="exeye-g2-hdr">${G2_MODE_PREFIX} Ready</div>
+        <div class="exeye-lens__prompt" id="exeye-g2-prompt" hidden></div>
         <div class="exeye-lens__body" id="exeye-g2-body"></div>
       </div>
       <div class="exeye-lens__vf-col">

@@ -123,6 +123,14 @@ body {
   color: #6fdc6f;
 }
 
+.exeye-lens__prompt {
+  font-size: 0.7rem;
+  line-height: 1.35;
+  color: #9ec5a0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .exeye-lens__body {
   flex: 1;
   font-size: 0.72rem;
@@ -196,6 +204,11 @@ body {
   color: var(--warn);
 }
 
+.exeye-lens[data-phase="listening"] .exeye-lens__hdr,
+.exeye-lens[data-phase="listening"] .exeye-lens__body {
+  color: #7dff9a;
+}
+
 .exeye-lens[data-phase="error"] .exeye-lens__hdr,
 .exeye-lens[data-phase="error"] .exeye-lens__body {
   color: var(--error);
@@ -207,6 +220,14 @@ body {
   letter-spacing: 0.06em;
   color: #7dff9a;
   text-transform: uppercase;
+}
+
+.exeye-g2-prompt {
+  font-size: 0.76rem;
+  line-height: 1.35;
+  color: #9ec5a0;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .exeye-g2-body {
@@ -221,6 +242,11 @@ body {
 
 .exeye-g2-screen[data-phase="analysing"] .exeye-g2-hdr {
   color: var(--warn);
+}
+
+.exeye-g2-screen[data-phase="listening"] .exeye-g2-hdr,
+.exeye-g2-screen[data-phase="listening"] .exeye-g2-body {
+  color: #7dff9a;
 }
 
 .exeye-g2-screen[data-phase="error"] .exeye-g2-hdr {
@@ -249,6 +275,11 @@ body {
 
 .exeye-dot--busy {
   background: var(--warn);
+  animation: exeye-pulse 1s ease-in-out infinite;
+}
+
+.exeye-dot--listening {
+  background: #7dff9a;
   animation: exeye-pulse 1s ease-in-out infinite;
 }
 
@@ -345,6 +376,21 @@ body {
 .exeye-prompt-input:focus {
   outline: 2px solid #2f6b4a;
   outline-offset: 1px;
+}
+
+.exeye-prompt-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.exeye-btn--voice {
+  border-color: #2f6b4a;
+  color: #7dff9a;
+}
+
+.exeye-btn--voice[aria-pressed="true"] {
+  background: rgba(47, 107, 74, 0.2);
 }
 
 .exeye-prompt-status {

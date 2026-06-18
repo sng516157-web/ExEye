@@ -39,6 +39,13 @@ export const EXEYE_CONFIG = {
       : `http://${devHost}:3000/analyse-frame`
   ),
 
+  speechEndpoint: envString(
+    "VITE_SPEECH_ENDPOINT",
+    import.meta.env.PROD
+      ? "https://api.yourdomain.com/transcribe-prompt"
+      : `http://${devHost}:3000/transcribe-prompt`
+  ),
+
   defaultVisionPrompt: DEFAULT_VISION_PROMPT,
 
   periodicScanEnabled: false,

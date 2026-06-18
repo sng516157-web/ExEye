@@ -1,8 +1,9 @@
-import { G2_STATUS_HEADER, G2_STATUS_WRAP_WIDTH } from "./g2Layout";
+import { G2_MODE_PREFIX, G2_STATUS_WRAP_WIDTH } from "./g2Layout";
 import { stripMarkdownFormatting } from "../utils/markdown";
 
 export type DisplayPhase =
   | "ready"
+  | "listening"
   | "capturing"
   | "analysing"
   | "result"
@@ -10,7 +11,10 @@ export type DisplayPhase =
 
 export interface DisplayUpdate {
   phase: DisplayPhase;
+  /** Status text or AI response (shown below the prompt line). */
   message: string;
+  /** User prompt — persists on lens until replaced by a new voice session. */
+  prompt?: string;
 }
 
 export function normalizeDisplayUpdate(
@@ -25,14 +29,16 @@ export function normalizeDisplayUpdate(
 
 const PHASE_LABEL: Record<DisplayPhase, string> = {
   ready: "Ready",
-  capturing: "Capturing…",
-  analysing: "Analysing…",
-  result: "Latest view",
+  listening: "Listening",
+  capturing: "Capturing",
+  analysing: "Analysing",
+  result: "Result",
   error: "Error",
 };
 
-export function formatG2Header(_phase?: DisplayPhase): string {
-  return G2_STATUS_HEADER;
+/** Dynamic mode line for G2 status column, e.g. "ExEye · Listening". */
+export function formatG2Header(phase: DisplayPhase): string {
+  return `${G2_MODE_PREFIX} ${PHASE_LABEL[phase]}`;
 }
 
 export function phaseStatusHint(phase: DisplayPhase): string {
@@ -44,6 +50,23 @@ export function formatG2Body(
   maxWidth = G2_STATUS_WRAP_WIDTH
 ): string {
   return wrapText(stripMarkdownFormatting(message.trim()), maxWidth);
+}
+
+/** Full status-column text for the G2 TextContainer. */
+export function formatG2StatusContent(update: DisplayUpdate): string {
+  const lines = [formatG2Header(update.phase)];
+  const prompt = update.prompt?.trim();
+  const message = formatG2Body(update.message);
+
+  if (prompt) {
+    lines.push(formatG2Body(prompt));
+  }
+
+  if (message && message !== lines[lines.length - 1]) {
+    lines.push(message);
+  }
+
+  return lines.join("\n");
 }
 
 export function phaseFromLegacyMessage(message: string): DisplayPhase {

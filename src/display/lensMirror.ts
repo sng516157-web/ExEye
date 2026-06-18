@@ -1,4 +1,5 @@
 import type { ViewfinderLayout } from "./g2Layout";
+import { formatG2Header } from "./displayUi";
 import type { DisplayUpdate } from "./displayUi";
 import { stripMarkdownFormatting } from "../utils/markdown";
 import { createViewfinderPreviewUrl } from "../utils/g2Image";
@@ -10,9 +11,27 @@ export function updateLensMirror(
   update: DisplayUpdate
 ): void {
   const screen = root.querySelector("#exeye-screen");
+  const hdr = root.querySelector("#exeye-g2-hdr");
+  const promptEl = root.querySelector<HTMLElement>("#exeye-g2-prompt");
   const body = root.querySelector("#exeye-g2-body");
 
   screen?.setAttribute("data-phase", update.phase);
+
+  if (hdr) {
+    hdr.textContent = formatG2Header(update.phase);
+  }
+
+  const prompt = stripMarkdownFormatting(update.prompt?.trim() ?? "");
+
+  if (promptEl) {
+    if (prompt) {
+      promptEl.textContent = prompt;
+      promptEl.removeAttribute("hidden");
+    } else {
+      promptEl.textContent = "";
+      promptEl.hidden = true;
+    }
+  }
 
   if (body) {
     body.textContent = stripMarkdownFormatting(update.message);

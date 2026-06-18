@@ -71,8 +71,16 @@ export class BrowserDisplayAdapter implements DisplayAdapter {
 
     if (dot) {
       dot.className = "exeye-dot";
-      if (update.phase === "capturing" || update.phase === "analysing") {
-        dot.classList.add("exeye-dot--busy");
+      if (
+        update.phase === "listening" ||
+        update.phase === "capturing" ||
+        update.phase === "analysing"
+      ) {
+        dot.classList.add(
+          update.phase === "listening"
+            ? "exeye-dot--listening"
+            : "exeye-dot--busy"
+        );
       } else if (update.phase === "error") {
         dot.classList.add("exeye-dot--error");
       }

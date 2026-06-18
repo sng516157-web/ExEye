@@ -1,22 +1,37 @@
-export type VisionProvider = "mock" | "gemini" | "ollama" | "openai";
+export type VisionProvider = "mock" | "groq" | "gemini" | "ollama" | "openai";
 
 export interface VisionConfig {
   provider: VisionProvider;
   model: string | null;
+  /** Secondary provider when primary is groq and GEMINI_API_KEY is set. */
+  fallback?: { provider: "gemini"; model: string };
 }
 
 export function resolveVisionConfig(): VisionConfig {
   const explicit = process.env.VISION_PROVIDER?.trim().toLowerCase();
+  const geminiModel =
+    process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash";
+  const groqModel =
+    process.env.GROQ_VISION_MODEL?.trim() ||
+    "meta-llama/llama-4-scout-17b-16e-instruct";
+  const hasGroq = Boolean(process.env.GROQ_API_KEY?.trim());
+  const hasGemini = Boolean(process.env.GEMINI_API_KEY?.trim());
 
   if (explicit === "mock") {
     return { provider: "mock", model: null };
   }
 
-  if (explicit === "gemini" || (!explicit && process.env.GEMINI_API_KEY?.trim())) {
+  if (explicit === "gemini") {
+    return { provider: "gemini", model: geminiModel };
+  }
+
+  if (explicit === "groq" || (!explicit && hasGroq)) {
     return {
-      provider: "gemini",
-      // 2.0-flash free tier gets 429 quickly; 2.5-flash works on free tier (2025).
-      model: process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash",
+      provider: "groq",
+      model: groqModel,
+      fallback: hasGemini
+        ? { provider: "gemini", model: geminiModel }
+        : undefined,
     };
   }
 
@@ -34,6 +49,10 @@ export function resolveVisionConfig(): VisionConfig {
     };
   }
 
+  if (hasGemini) {
+    return { provider: "gemini", model: geminiModel };
+  }
+
   return { provider: "mock", model: null };
 }
 
@@ -44,6 +63,29 @@ export async function analyseImage(
   prompt: string
 ): Promise<string> {
   switch (config.provider) {
+    case "groq":
+      try {
+        return await analyseWithGroq(
+          imageBuffer,
+          mimeType,
+          prompt,
+          config.model!
+        );
+      } catch (error) {
+        if (config.fallback?.provider === "gemini") {
+          console.error(
+            "[ExEye] Groq vision failed, falling back to Gemini",
+            error
+          );
+          return analyseWithGemini(
+            imageBuffer,
+            mimeType,
+            prompt,
+            config.fallback.model
+          );
+        }
+        throw error;
+      }
     case "gemini":
       return analyseWithGemini(imageBuffer, mimeType, prompt, config.model!);
     case "ollama":
@@ -84,7 +126,73 @@ export function shortenErrorMessage(message: string): string {
     }
   }
 
+  if (message.startsWith("Groq error")) {
+    const jsonStart = message.indexOf("{");
+    if (jsonStart > 0) {
+      return message.slice(0, jsonStart).trim();
+    }
+  }
+
   return message.length > 200 ? `${message.slice(0, 199)}…` : message;
+}
+
+async function analyseWithGroq(
+  imageBuffer: Buffer,
+  mimeType: string,
+  prompt: string,
+  model: string
+): Promise<string> {
+  const apiKey = process.env.GROQ_API_KEY?.trim();
+  if (!apiKey) {
+    throw new Error("GROQ_API_KEY is not set");
+  }
+
+  const mediaType = mimeType || "image/jpeg";
+  const base64 = imageBuffer.toString("base64");
+
+  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: 1024,
+      temperature: 0.2,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: prompt },
+            {
+              type: "image_url",
+              image_url: {
+                url: `data:${mediaType};base64,${base64}`,
+              },
+            },
+          ],
+        },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Groq error ${response.status}: ${detail}`);
+  }
+
+  const data = (await response.json()) as {
+    choices?: Array<{ message?: { content?: string } }>;
+  };
+
+  const summary = data.choices?.[0]?.message?.content?.trim();
+
+  if (!summary) {
+    throw new Error("Groq returned empty summary");
+  }
+
+  return summary;
 }
 
 async function analyseWithGemini(

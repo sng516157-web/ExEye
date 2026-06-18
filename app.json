@@ -8,6 +8,10 @@
   "entrypoint": "index.html",
   "permissions": [
     {
+      "name": "g2-microphone",
+      "desc": "Captures voice prompts from the G2 microphone array for speech-to-text."
+    },
+    {
       "name": "network",
       "desc": "Fetches collar-camera frames and sends them to the ExEye vision API for on-lens scene summaries.",
       "whitelist": [
