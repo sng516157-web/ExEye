@@ -18,7 +18,7 @@ This project follows the [Even Hub development process](https://hub.evenrealitie
 npm install
 cd server && npm install && cd ..
 cp .env.development.example .env.development.local
-# Edit .env.development.local — set VITE_DEV_HOST to your Mac LAN IP
+# Dev defaults need no LAN IP — API uses Vite proxy on the same host as the QR URL.
 ```
 
 ### Vision backend (separate terminal)
@@ -60,6 +60,8 @@ npm run qr:device
 
 5. Scan in the Even app (prototype / sideload flow)  
 6. **Tap** temple/ring → analyse · **Double tap** → exit  
+
+**Wi‑Fi changed?** Restart `npm run dev:device`, run `npm run qr:device` again (new QR only — no `.env` edits).
 
 During sideload, `app.json` network whitelist is **not enforced** ([Networking guide](https://hub.evenrealities.com/docs/guides/networking)).
 

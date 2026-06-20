@@ -1,63 +1,16 @@
 #!/usr/bin/env node
 /**
  * Run evenhub qr for the current Vite dev server (Even Hub hardware sideload).
+ * Always uses live LAN IP detection so Wi‑Fi changes only require re-running this.
  */
 import { execSync } from "node:child_process";
-import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import os from "node:os";
+import { detectLanIp } from "./lan-ip.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const port = process.env.VITE_PORT ?? "5173";
 const useHttp = process.argv.includes("--http");
-
-function isRfc1918(ip) {
-  const [a, b] = ip.split(".").map(Number);
-  if (a === 10) return true;
-  if (a === 172 && b >= 16 && b <= 31) return true;
-  if (a === 192 && b === 168) return true;
-  return false;
-}
-
-function readDevHostFromEnv() {
-  const envPath = resolve(root, ".env.development.local");
-  try {
-    const content = readFileSync(envPath, "utf8");
-    const match = content.match(/^VITE_DEV_HOST=(.+)$/m);
-    if (!match) return null;
-    const host = match[1].trim();
-    if (!host || host === "YOUR_MAC_LAN_IP") return null;
-    return host;
-  } catch {
-    return null;
-  }
-}
-
-function detectLanIp() {
-  const fromEnv = process.env.VITE_DEV_HOST?.trim() || readDevHostFromEnv();
-  if (fromEnv) return fromEnv;
-
-  const nets = os.networkInterfaces();
-  const preferred = [];
-  const fallback = [];
-
-  for (const ifaces of Object.values(nets)) {
-    for (const iface of ifaces ?? []) {
-      const family = iface.family;
-      if (family !== "IPv4" && family !== 4) continue;
-      if (iface.internal) continue;
-
-      const ip = iface.address;
-      if (ip.startsWith("169.254.")) continue;
-
-      if (isRfc1918(ip)) preferred.push(ip);
-      else fallback.push(ip);
-    }
-  }
-
-  return preferred[0] ?? fallback[0] ?? "127.0.0.1";
-}
 
 const ip = detectLanIp();
 const scheme = useHttp ? "http" : "https";
@@ -66,7 +19,10 @@ const url = `${scheme}://${ip}:${port}`;
 console.log(`\nExEye sideload URL: ${url}`);
 if (useHttp) {
   console.log(
-    "Use HTTP dev server: npm run dev:device (HTTPS self-signed certs hang in the Even app)\n"
+    "Use HTTP dev server: npm run dev:device (HTTPS self-signed certs hang in the Even app)"
+  );
+  console.log(
+    "After Wi‑Fi change: restart dev:device if needed, then run qr:device again.\n"
   );
 } else {
   console.log(

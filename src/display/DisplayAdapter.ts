@@ -7,6 +7,13 @@ export interface PromptControls {
   isVoiceListening?: () => boolean;
 }
 
+export interface CameraControls {
+  getCameraUrl: () => string;
+  setCameraHost: (host: string, path?: string) => Promise<void>;
+  discoverCamera: () => Promise<string | null>;
+  testCamera: () => Promise<boolean>;
+}
+
 export interface DisplayControls {
   onAnalyse: () => void;
   /** Single temple/ring tap — speak a voice prompt (G2). */
@@ -16,6 +23,7 @@ export interface DisplayControls {
   isVoiceListening?: () => boolean;
   isAnalysing?: () => boolean;
   prompt?: PromptControls;
+  camera?: CameraControls;
 }
 
 export interface DisplayAdapter {

@@ -1,6 +1,8 @@
 import "../ui/browser.css";
 
+import { EXEYE_CONFIG } from "../config";
 import { bindPromptPanel, PROMPT_PANEL_HTML } from "../ui/promptPanel";
+import { bindCameraPanel, CAMERA_PANEL_HTML } from "../ui/cameraPanel";
 import { DisplayAdapter, DisplayControls } from "./DisplayAdapter";
 import {
   normalizeDisplayUpdate,
@@ -33,6 +35,8 @@ export class BrowserDisplayAdapter implements DisplayAdapter {
           <div class="exeye-g2-label">G2 lens preview</div>
           ${renderG2LensMarkup()}
         </section>
+
+        ${EXEYE_CONFIG.cameraMode === "http" ? CAMERA_PANEL_HTML : ""}
 
         ${PROMPT_PANEL_HTML}
 
@@ -107,6 +111,10 @@ export class BrowserDisplayAdapter implements DisplayAdapter {
 
     if (handlers.prompt) {
       bindPromptPanel(this.root, handlers.prompt);
+    }
+
+    if (handlers.camera) {
+      bindCameraPanel(this.root, handlers.camera);
     }
   }
 

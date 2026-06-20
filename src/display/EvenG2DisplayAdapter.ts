@@ -15,6 +15,7 @@ import {
 import { EXEYE_CONFIG } from "../config";
 import "../ui/browser.css";
 import { bindPromptPanel, PROMPT_PANEL_HTML } from "../ui/promptPanel";
+import { bindCameraPanel, CAMERA_PANEL_HTML } from "../ui/cameraPanel";
 import { DisplayAdapter, DisplayControls } from "./DisplayAdapter";
 import {
   formatG2StatusContent,
@@ -78,6 +79,10 @@ export class EvenG2DisplayAdapter implements DisplayAdapter {
 
     if (this.phoneRoot && handlers.prompt) {
       bindPromptPanel(this.phoneRoot, handlers.prompt);
+    }
+
+    if (this.phoneRoot && handlers.camera) {
+      bindCameraPanel(this.phoneRoot, handlers.camera);
     }
 
     this.ensureEventSubscription();
@@ -231,6 +236,8 @@ export class EvenG2DisplayAdapter implements DisplayAdapter {
           <div class="exeye-g2-label">On your glasses now</div>
           ${renderG2LensMarkup()}
         </section>
+
+        ${EXEYE_CONFIG.cameraMode === "http" ? CAMERA_PANEL_HTML : ""}
 
         ${PROMPT_PANEL_HTML}
 

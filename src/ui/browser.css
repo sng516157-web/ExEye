@@ -399,3 +399,48 @@ body {
   font-size: 0.72rem;
   color: var(--accent);
 }
+
+.exeye-camera-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.85rem;
+  border-radius: 0.85rem;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.exeye-camera-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.exeye-camera-input {
+  flex: 1 1 10rem;
+  min-width: 0;
+  padding: 0.55rem 0.75rem;
+  border-radius: 0.6rem;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.88rem;
+}
+
+.exeye-camera-input:focus,
+.exeye-camera-path:focus {
+  outline: 2px solid #2f6b4a;
+  outline-offset: 1px;
+}
+
+.exeye-camera-path {
+  flex: 0 0 auto;
+  padding: 0.55rem 0.65rem;
+  border-radius: 0.6rem;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.82rem;
+}

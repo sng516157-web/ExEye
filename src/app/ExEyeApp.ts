@@ -1,6 +1,15 @@
 import { CameraSource } from "../camera/CameraSource";
+import {
+  buildCameraUrl,
+  isDevWebcamSnapshotUrl,
+  loadStoredCameraUrl,
+  saveStoredCameraUrl,
+  subnetFromHost,
+} from "../camera/cameraUrl";
+import { discoverCameraOnNetwork } from "../camera/discoverCamera";
+import { HttpCameraSource } from "../camera/HttpCameraSource";
 import { WebcamCameraSource } from "../camera/WebcamCameraSource";
-import { EXEYE_CONFIG } from "../config";
+import { EXEYE_CONFIG, apiHostForDiscovery } from "../config";
 import { DisplayAdapter } from "../display/DisplayAdapter";
 import { EXEYE_STARTUP_TEXT } from "../display/EvenG2DisplayAdapter";
 import { createSpeechPromptSource } from "../speech/createSpeechPromptSource";
@@ -43,12 +52,94 @@ export class ExEyeApp {
     saveStoredPrompt(this.visionPrompt);
   }
 
+  private isHttpCamera(): boolean {
+    return this.camera instanceof HttpCameraSource;
+  }
+
+  private getHttpCamera(): HttpCameraSource {
+    if (!(this.camera instanceof HttpCameraSource)) {
+      throw new Error("HTTP camera is not configured");
+    }
+
+    return this.camera;
+  }
+
+  getHttpCameraUrl(): string {
+    return this.getHttpCamera().getCaptureUrl();
+  }
+
+  async setCameraHost(host: string, path = "/capture"): Promise<void> {
+    const url = buildCameraUrl(host, path);
+    if (!url) {
+      throw new Error("Enter a valid camera IP or URL.");
+    }
+
+    this.applyCameraUrl(url);
+  }
+
+  async discoverCamera(): Promise<string | null> {
+    if (!this.isHttpCamera()) {
+      return null;
+    }
+
+    const subnet = subnetFromHost(
+      apiHostForDiscovery(EXEYE_CONFIG.visionEndpoint)
+    );
+    const url = await discoverCameraOnNetwork(subnet);
+
+    if (url) {
+      this.applyCameraUrl(url);
+    }
+
+    return url;
+  }
+
+  async testCamera(): Promise<boolean> {
+    const blob = await this.getHttpCamera().captureFrame();
+    return blob.size > 0;
+  }
+
+  private initCameraFromStorage(): void {
+    if (!this.isHttpCamera()) {
+      return;
+    }
+
+    const stored = loadStoredCameraUrl();
+    if (stored) {
+      this.getHttpCamera().setCaptureUrl(stored);
+    }
+  }
+
+  private applyCameraUrl(url: string): void {
+    this.getHttpCamera().setCaptureUrl(url);
+    saveStoredCameraUrl(url);
+  }
+
+  private async maybeAutoDiscoverCamera(): Promise<void> {
+    if (!this.isHttpCamera()) {
+      return;
+    }
+
+    if (loadStoredCameraUrl()) {
+      return;
+    }
+
+    const currentUrl = this.getHttpCameraUrl();
+    if (isDevWebcamSnapshotUrl(currentUrl)) {
+      return;
+    }
+
+    await this.discoverCamera();
+  }
+
   async start(): Promise<void> {
     await this.display.init();
 
     this.speech = await createSpeechPromptSource(
       new SpeechClient(EXEYE_CONFIG.speechEndpoint)
     );
+
+    this.initCameraFromStorage();
 
     this.display.bindControls?.({
       onAnalyse: () => void this.analyseOnce(),
@@ -63,9 +154,21 @@ export class ExEyeApp {
         startVoicePrompt: () => this.startVoicePrompt(),
         isVoiceListening: () => this.voiceListening,
       },
+      ...(this.isHttpCamera()
+        ? {
+            camera: {
+              getCameraUrl: () => this.getHttpCameraUrl(),
+              setCameraHost: (host, path) => this.setCameraHost(host, path),
+              discoverCamera: () => this.discoverCamera(),
+              testCamera: () => this.testCamera(),
+            },
+          }
+        : {}),
     });
 
     await this.display.showText(EXEYE_STARTUP_TEXT);
+
+    void this.maybeAutoDiscoverCamera();
 
     if (this.periodicEnabled) {
       this.startPeriodicScan();

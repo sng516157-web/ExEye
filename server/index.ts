@@ -4,6 +4,7 @@ import multer from "multer";
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { captureWebcamJpeg } from "./webcamCapture.js";
+import { discoverEsp32Camera } from "./cameraDiscover.js";
 import { augmentVisionPrompt, stripMarkdownFormatting } from "./prompt.js";
 import { resolveSttProvider, transcribeAudio } from "./stt.js";
 import {
@@ -50,6 +51,54 @@ app.get("/camera/snapshot", async (_req, res) => {
     console.error("[ExEye] /camera/snapshot failed", error);
     res.status(500).json({
       error: error instanceof Error ? error.message : "Webcam capture failed",
+    });
+  }
+});
+
+app.get("/camera/discover", async (req, res) => {
+  try {
+    const subnet =
+      typeof req.query.subnet === "string" ? req.query.subnet : undefined;
+    const url = await discoverEsp32Camera(subnet);
+    res.json({ url, found: Boolean(url) });
+  } catch (error) {
+    console.error("[ExEye] /camera/discover failed", error);
+    res.status(500).json({
+      error:
+        error instanceof Error ? error.message : "Camera discovery failed",
+    });
+  }
+});
+
+app.get("/camera/proxy", async (req, res) => {
+  const target = typeof req.query.url === "string" ? req.query.url.trim() : "";
+
+  if (!target.startsWith("http://") && !target.startsWith("https://")) {
+    res.status(400).json({ error: "Missing or invalid camera url" });
+    return;
+  }
+
+  try {
+    const upstream = await fetch(target, { cache: "no-store" });
+
+    if (!upstream.ok) {
+      res.status(upstream.status).json({
+        error: `Camera returned HTTP ${upstream.status}`,
+      });
+      return;
+    }
+
+    const body = Buffer.from(await upstream.arrayBuffer());
+    res.set(
+      "Content-Type",
+      upstream.headers.get("content-type") ?? "image/jpeg"
+    );
+    res.set("Cache-Control", "no-store");
+    res.send(body);
+  } catch (error) {
+    console.error("[ExEye] /camera/proxy failed", error);
+    res.status(502).json({
+      error: error instanceof Error ? error.message : "Camera proxy failed",
     });
   }
 });

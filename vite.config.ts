@@ -19,6 +19,18 @@ export default defineConfig({
         target: "http://localhost:3000",
         changeOrigin: true,
       },
+      "/camera/discover": {
+        target: "http://localhost:3000",
+        changeOrigin: true,
+      },
+      "/camera/proxy": {
+        target: "http://localhost:3000",
+        changeOrigin: true,
+      },
+      "/camera/snapshot": {
+        target: "http://localhost:3000",
+        changeOrigin: true,
+      },
     },
   },
 });
