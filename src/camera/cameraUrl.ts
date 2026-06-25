@@ -36,10 +36,18 @@ export function buildCameraUrl(
 }
 
 export function parseCameraHost(url: string): string {
+  if (isDevWebcamSnapshotUrl(url)) {
+    return "";
+  }
+
   try {
-    return new URL(url).hostname;
+    const parsed = new URL(
+      url,
+      typeof window !== "undefined" ? window.location.origin : "http://localhost"
+    );
+    return parsed.hostname;
   } catch {
-    return url;
+    return "";
   }
 }
 
@@ -80,4 +88,25 @@ export function saveStoredCameraUrl(url: string): void {
 
 export function isDevWebcamSnapshotUrl(url: string): boolean {
   return url.includes("/camera/snapshot");
+}
+
+export function isEsp32StyleCameraUrl(url: string): boolean {
+  if (isDevWebcamSnapshotUrl(url)) {
+    return false;
+  }
+
+  return (
+    url.includes("/capture") ||
+    url.includes("/jpg") ||
+    url.includes("/photo.jpg") ||
+    url.includes("/cam-hi.jpg")
+  );
+}
+
+export function clearStoredCameraUrl(): void {
+  try {
+    localStorage.removeItem(CAMERA_URL_STORAGE_KEY);
+  } catch {
+    // ignore
+  }
 }

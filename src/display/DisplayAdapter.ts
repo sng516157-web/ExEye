@@ -12,6 +12,8 @@ export interface CameraControls {
   setCameraHost: (host: string, path?: string) => Promise<void>;
   discoverCamera: () => Promise<string | null>;
   testCamera: () => Promise<boolean>;
+  useDevWebcam?: () => Promise<void>;
+  isUsingDevWebcam?: () => boolean;
 }
 
 export interface DisplayControls {
@@ -33,7 +35,7 @@ export interface DisplayAdapter {
 
   showText(update: string | DisplayUpdate): Promise<void>;
 
-  /** Show the latest camera frame in the view finder (persists until replaced). */
+  /** Show a captured camera frame in the view finder. */
   showViewfinder?(image: Blob): Promise<void>;
 
   bindControls?(handlers: DisplayControls): void;

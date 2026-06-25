@@ -1,3 +1,5 @@
+import { resolveApiUrl } from "../config";
+
 export class SpeechClient {
   constructor(private readonly endpoint: string) {}
 
@@ -5,7 +7,7 @@ export class SpeechClient {
     const formData = new FormData();
     formData.append("audio", wav, "prompt.wav");
 
-    const response = await fetch(this.endpoint, {
+    const response = await fetch(resolveApiUrl(this.endpoint), {
       method: "POST",
       body: formData,
     });

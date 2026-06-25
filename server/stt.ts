@@ -1,34 +1,54 @@
+import { Agent } from "undici";
+
 export type SttProvider = "openai" | "groq" | "gemini" | "none";
 
-export function resolveSttProvider(): SttProvider {
+const STT_HTTP_AGENT = new Agent({
+  connect: { timeout: 30_000 },
+  headersTimeout: 60_000,
+  bodyTimeout: 120_000,
+});
+
+export function resolveSttFallbackChain(): SttProvider[] {
   const explicit = process.env.STT_PROVIDER?.trim().toLowerCase();
+  const hasGroq = Boolean(process.env.GROQ_API_KEY?.trim());
+  const hasOpenai = Boolean(process.env.OPENAI_API_KEY?.trim());
+  const hasGemini = Boolean(process.env.GEMINI_API_KEY?.trim());
 
-  if (explicit === "groq" && process.env.GROQ_API_KEY?.trim()) {
-    return "groq";
+  if (explicit === "gemini") {
+    return hasGemini ? ["gemini"] : ["none"];
   }
 
-  if (explicit === "openai" && process.env.OPENAI_API_KEY?.trim()) {
-    return "openai";
+  if (explicit === "openai") {
+    return hasOpenai ? ["openai"] : ["none"];
   }
 
-  if (explicit === "gemini" && process.env.GEMINI_API_KEY?.trim()) {
-    return "gemini";
+  if (explicit === "groq") {
+    const chain: SttProvider[] = hasGroq ? ["groq"] : [];
+    if (hasGemini) {
+      chain.push("gemini");
+    }
+    if (hasOpenai) {
+      chain.push("openai");
+    }
+    return chain.length ? chain : ["none"];
   }
 
-  // Prefer dedicated speech models over Gemini multimodal for accuracy/speed.
-  if (process.env.GROQ_API_KEY?.trim()) {
-    return "groq";
+  const chain: SttProvider[] = [];
+  if (hasGroq) {
+    chain.push("groq");
+  }
+  if (hasGemini) {
+    chain.push("gemini");
+  }
+  if (hasOpenai) {
+    chain.push("openai");
   }
 
-  if (process.env.OPENAI_API_KEY?.trim()) {
-    return "openai";
-  }
+  return chain.length ? chain : ["none"];
+}
 
-  if (process.env.GEMINI_API_KEY?.trim()) {
-    return "gemini";
-  }
-
-  return "none";
+export function resolveSttProvider(): SttProvider {
+  return resolveSttFallbackChain()[0] ?? "none";
 }
 
 export async function transcribeAudio(wavBuffer: Buffer): Promise<string> {
@@ -36,29 +56,103 @@ export async function transcribeAudio(wavBuffer: Buffer): Promise<string> {
     return "";
   }
 
-  const provider = resolveSttProvider();
-  let transcript: string;
+  const providers = resolveSttFallbackChain();
+  let lastError: Error | undefined;
 
-  switch (provider) {
-    case "groq":
-      transcript = await transcribeWithGroq(wavBuffer);
+  for (const provider of providers) {
+    if (provider === "none") {
       break;
-    case "openai":
-      transcript = await transcribeWithOpenAI(wavBuffer);
-      break;
-    case "gemini":
-      transcript = await transcribeWithGemini(wavBuffer);
-      break;
-    default:
-      throw new Error(
-        "No speech API key configured. Set GROQ_API_KEY, OPENAI_API_KEY, or GEMINI_API_KEY in server/.env"
-      );
+    }
+
+    try {
+      const transcript = await transcribeWithRetries(provider, wavBuffer);
+      return sanitizeTranscript(transcript);
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      console.error(`[ExEye] STT ${provider} failed`, error);
+    }
   }
 
-  return sanitizeTranscript(transcript);
+  if (lastError) {
+    throw lastError;
+  }
+
+  throw new Error(
+    "No speech API key configured. Set GROQ_API_KEY, OPENAI_API_KEY, or GEMINI_API_KEY in server/.env"
+  );
 }
 
-function wavHasSpeech(wavBuffer: Buffer, minRms = 0.012): boolean {
+async function transcribeWithRetries(
+  provider: SttProvider,
+  wavBuffer: Buffer,
+  attempts = 2
+): Promise<string> {
+  let lastError: Error | undefined;
+
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return await transcribeWithProvider(provider, wavBuffer);
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+
+      if (attempt < attempts && isRetryableSttError(lastError)) {
+        await delay(400 * attempt);
+        continue;
+      }
+
+      throw lastError;
+    }
+  }
+
+  throw lastError ?? new Error(`STT ${provider} failed`);
+}
+
+async function transcribeWithProvider(
+  provider: SttProvider,
+  wavBuffer: Buffer
+): Promise<string> {
+  switch (provider) {
+    case "groq":
+      return transcribeWithGroq(wavBuffer);
+    case "openai":
+      return transcribeWithOpenAI(wavBuffer);
+    case "gemini":
+      return transcribeWithGemini(wavBuffer);
+    default:
+      throw new Error(`Unsupported STT provider: ${provider}`);
+  }
+}
+
+function isRetryableSttError(error: Error): boolean {
+  const message = error.message;
+  const cause = (error as Error & { cause?: unknown }).cause;
+  const causeText =
+    cause instanceof Error
+      ? `${cause.name} ${cause.message}`
+      : String(cause ?? "");
+
+  const combined = `${message} ${causeText}`;
+
+  return (
+    combined.includes("fetch failed") ||
+    combined.includes("CONNECT_TIMEOUT") ||
+    combined.includes("UND_ERR_CONNECT_TIMEOUT") ||
+    combined.includes("ECONNRESET") ||
+    combined.includes("ETIMEDOUT") ||
+    combined.includes("STT error 429") ||
+    combined.includes("STT error 502") ||
+    combined.includes("STT error 503") ||
+    combined.includes("Gemini STT error 429") ||
+    combined.includes("RESOURCE_EXHAUSTED")
+  );
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** G2 mic audio can be quiet — keep threshold low. */
+function wavHasSpeech(wavBuffer: Buffer, minRms = 0.006): boolean {
   if (wavBuffer.byteLength <= 44) {
     return false;
   }
@@ -151,7 +245,7 @@ async function postWhisperCompatible(
   form.append("language", process.env.STT_LANGUAGE?.trim() || "en");
   form.append("response_format", "json");
 
-  const response = await fetch(url, {
+  const response = await sttFetch(url, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -165,13 +259,7 @@ async function postWhisperCompatible(
   }
 
   const data = (await response.json()) as { text?: string };
-  const transcript = data.text?.trim();
-
-  if (!transcript) {
-    throw new Error("STT returned empty transcript");
-  }
-
-  return transcript;
+  return data.text?.trim() ?? "";
 }
 
 async function transcribeWithGemini(wavBuffer: Buffer): Promise<string> {
@@ -184,7 +272,7 @@ async function transcribeWithGemini(wavBuffer: Buffer): Promise<string> {
   const base64 = wavBuffer.toString("base64");
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
-  const response = await fetch(url, {
+  const response = await sttFetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -221,11 +309,12 @@ async function transcribeWithGemini(wavBuffer: Buffer): Promise<string> {
     }>;
   };
 
-  const transcript = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+  return data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? "";
+}
 
-  if (!transcript) {
-    throw new Error("Gemini STT returned empty transcript");
-  }
-
-  return transcript;
+function sttFetch(url: string, init: RequestInit): Promise<Response> {
+  return fetch(url, {
+    ...init,
+    dispatcher: STT_HTTP_AGENT,
+  } as RequestInit & { dispatcher: Agent });
 }

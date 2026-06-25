@@ -17,6 +17,7 @@ import { SpeechClient } from "../speech/SpeechClient";
 import type { SpeechPromptSource } from "../speech/types";
 import type { DisplayUpdate } from "../display/displayUi";
 import { VisionClient } from "../vision/VisionClient";
+import { promptNeedsVision } from "../vision/promptNeedsVision";
 
 const PROMPT_STORAGE_KEY = "exeye.visionPrompt";
 
@@ -33,7 +34,6 @@ export class ExEyeApp {
     start: () => undefined,
     abort: () => undefined,
   };
-
   constructor(
     private readonly camera: CameraSource,
     private readonly vision: VisionClient,
@@ -99,14 +99,67 @@ export class ExEyeApp {
     return blob.size > 0;
   }
 
+  async useDevWebcam(): Promise<void> {
+    if (!this.isHttpCamera()) {
+      return;
+    }
+
+    this.applyCameraUrl(EXEYE_CONFIG.httpCameraUrl);
+    await this.testCamera();
+  }
+
+  isUsingDevWebcam(): boolean {
+    return (
+      this.isHttpCamera() && isDevWebcamSnapshotUrl(this.getHttpCameraUrl())
+    );
+  }
+
   private initCameraFromStorage(): void {
     if (!this.isHttpCamera()) {
       return;
     }
 
     const stored = loadStoredCameraUrl();
+    const devDefault = EXEYE_CONFIG.httpCameraUrl;
+
+    if (import.meta.env.DEV) {
+      // Dev: laptop webcam unless user explicitly saved the dev snapshot URL
+      if (stored && isDevWebcamSnapshotUrl(stored)) {
+        this.getHttpCamera().setCaptureUrl(stored);
+      } else {
+        this.applyCameraUrl(devDefault);
+      }
+      return;
+    }
+
     if (stored) {
       this.getHttpCamera().setCaptureUrl(stored);
+    }
+  }
+
+  private async ensureCameraReachable(): Promise<void> {
+    if (!this.isHttpCamera()) {
+      return;
+    }
+
+    try {
+      await this.testCamera();
+      return;
+    } catch (error) {
+      console.warn("[ExEye] camera unreachable, trying dev webcam", error);
+    }
+
+    if (!import.meta.env.DEV) {
+      return;
+    }
+
+    this.applyCameraUrl(EXEYE_CONFIG.httpCameraUrl);
+
+    try {
+      await this.testCamera();
+      console.info("[ExEye] Using laptop webcam at", EXEYE_CONFIG.httpCameraUrl);
+    } catch (error) {
+      console.error("[ExEye] Laptop webcam also failed", error);
     }
   }
 
@@ -116,7 +169,7 @@ export class ExEyeApp {
   }
 
   private async maybeAutoDiscoverCamera(): Promise<void> {
-    if (!this.isHttpCamera()) {
+    if (!this.isHttpCamera() || import.meta.env.DEV) {
       return;
     }
 
@@ -140,6 +193,7 @@ export class ExEyeApp {
     );
 
     this.initCameraFromStorage();
+    await this.ensureCameraReachable();
 
     this.display.bindControls?.({
       onAnalyse: () => void this.analyseOnce(),
@@ -161,6 +215,8 @@ export class ExEyeApp {
               setCameraHost: (host, path) => this.setCameraHost(host, path),
               discoverCamera: () => this.discoverCamera(),
               testCamera: () => this.testCamera(),
+              useDevWebcam: () => this.useDevWebcam(),
+              isUsingDevWebcam: () => this.isUsingDevWebcam(),
             },
           }
         : {}),
@@ -246,38 +302,53 @@ export class ExEyeApp {
     });
   }
 
-  async analyseOnce(): Promise<void> {
+  async analyseOnce(options?: { fromPeriodic?: boolean }): Promise<void> {
     if (this.analysing || this.voiceListening) {
       return;
     }
-
-    this.analysing = true;
 
     if (!this.activePrompt) {
       this.activePrompt = this.getVisionPrompt();
     }
 
+    const prompt = this.visionPrompt.trim();
+    const needsVision = promptNeedsVision(prompt);
+
+    if (!needsVision && options?.fromPeriodic) {
+      return;
+    }
+
+    this.analysing = true;
+
     try {
-      await this.showStatus({
-        phase: "capturing",
-        message: "Fetching camera frame…",
-      });
+      let summary: string;
 
-      const frame = await this.camera.captureFrame();
+      if (needsVision) {
+        await this.showStatus({
+          phase: "capturing",
+          message: "Fetching camera frame…",
+        });
 
-      if (this.display.showViewfinder) {
-        await this.display.showViewfinder(frame);
+        const frame = await this.camera.captureFrame();
+
+        if (this.display.showViewfinder) {
+          await this.display.showViewfinder(frame);
+        }
+
+        await this.showStatus({
+          phase: "analysing",
+          message: "Sending to vision AI…",
+        });
+
+        summary = await this.vision.analyseFrame(frame, this.visionPrompt);
+      } else {
+        await this.showStatus({
+          phase: "analysing",
+          message: "Sending to AI…",
+        });
+
+        summary = await this.vision.analysePrompt(this.visionPrompt);
       }
-
-      await this.showStatus({
-        phase: "analysing",
-        message: "Sending to vision AI…",
-      });
-
-      const summary = await this.vision.analyseFrame(
-        frame,
-        this.visionPrompt
-      );
 
       await this.showStatus({
         phase: "result",
@@ -319,7 +390,7 @@ export class ExEyeApp {
     this.stopPeriodicScan();
 
     this.periodicTimer = setInterval(() => {
-      void this.analyseOnce();
+      void this.analyseOnce({ fromPeriodic: true });
     }, EXEYE_CONFIG.periodicScanMs);
   }
 
@@ -344,12 +415,20 @@ export class ExEyeApp {
 
     if (
       message.includes("Vision backend failed") ||
-      message.includes("Speech backend failed") ||
+      message.includes("AI backend failed") ||
       message.includes("OpenAI error") ||
       message.includes("Gemini error") ||
       message.includes("insufficient_quota")
     ) {
-      return `Vision API error.\n${message}`;
+      return `AI error.\n${message}`;
+    }
+
+    if (
+      message.includes("Speech backend failed") ||
+      message.includes("STT error") ||
+      message.includes("Gemini STT")
+    ) {
+      return `Speech API error.\n${message}`;
     }
 
     if (message.includes("empty summary")) {

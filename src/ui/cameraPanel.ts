@@ -1,5 +1,6 @@
 import {
   ESP32_CAMERA_PATHS,
+  isDevWebcamSnapshotUrl,
   parseCameraHost,
   parseCameraPath,
   type Esp32CameraPath,
@@ -7,12 +8,12 @@ import {
 import type { CameraControls } from "../display/DisplayAdapter";
 
 export const CAMERA_PANEL_HTML = `
-  <section class="exeye-camera-panel" aria-label="ESP32 camera">
+  <section class="exeye-camera-panel" aria-label="Camera source">
     <label class="exeye-prompt-label" for="exeye-camera-ip">
-      ESP32 camera
+      Camera
     </label>
     <p class="exeye-prompt-hint">
-      Enter the camera IP on your Wi‑Fi network, or tap Find camera to scan.
+      Dev: use Laptop webcam until your ESP32 is ready. Later, enter the ESP32 IP or tap Find camera.
     </p>
     <div class="exeye-camera-row">
       <input
@@ -31,14 +32,17 @@ export const CAMERA_PANEL_HTML = `
       </select>
     </div>
     <div class="exeye-prompt-actions">
+      <button type="button" class="exeye-btn exeye-btn--primary" id="exeye-camera-webcam">
+        Laptop webcam (dev)
+      </button>
       <button type="button" class="exeye-btn" id="exeye-camera-save">
-        Save camera
+        Save ESP32
       </button>
       <button type="button" class="exeye-btn" id="exeye-camera-test">
         Test
       </button>
-      <button type="button" class="exeye-btn exeye-btn--primary" id="exeye-camera-discover">
-        Find camera
+      <button type="button" class="exeye-btn" id="exeye-camera-discover">
+        Find ESP32
       </button>
     </div>
     <p class="exeye-prompt-status" id="exeye-camera-status" aria-live="polite"></p>
@@ -54,20 +58,11 @@ export function bindCameraPanel(
   const saveBtn = root.querySelector("#exeye-camera-save");
   const testBtn = root.querySelector("#exeye-camera-test");
   const discoverBtn = root.querySelector("#exeye-camera-discover");
+  const webcamBtn = root.querySelector("#exeye-camera-webcam");
   const status = root.querySelector("#exeye-camera-status");
 
   if (!(ipInput instanceof HTMLInputElement)) {
     return;
-  }
-
-  const currentUrl = controls.getCameraUrl();
-  ipInput.value = parseCameraHost(currentUrl);
-
-  if (pathSelect instanceof HTMLSelectElement) {
-    const path = parseCameraPath(currentUrl);
-    if (ESP32_CAMERA_PATHS.includes(path as Esp32CameraPath)) {
-      pathSelect.value = path;
-    }
   }
 
   const setStatus = (message: string) => {
@@ -85,6 +80,15 @@ export function bindCameraPanel(
 
   const syncFromControls = () => {
     const url = controls.getCameraUrl();
+
+    if (controls.isUsingDevWebcam?.() || isDevWebcamSnapshotUrl(url)) {
+      ipInput.value = "";
+      ipInput.placeholder = "Using this laptop webcam";
+      setStatus("Using laptop webcam (/camera/snapshot).");
+      return;
+    }
+
+    ipInput.placeholder = "192.168.0.50";
     ipInput.value = parseCameraHost(url);
     if (pathSelect instanceof HTMLSelectElement) {
       const path = parseCameraPath(url);
@@ -93,6 +97,31 @@ export function bindCameraPanel(
       }
     }
   };
+
+  syncFromControls();
+
+  webcamBtn?.addEventListener("click", async () => {
+    if (!controls.useDevWebcam) {
+      return;
+    }
+
+    setStatus("Switching to laptop webcam…");
+    webcamBtn.setAttribute("disabled", "");
+
+    try {
+      await controls.useDevWebcam();
+      syncFromControls();
+      setStatus("Laptop webcam active.");
+    } catch (error) {
+      setStatus(
+        error instanceof Error
+          ? error.message
+          : "Laptop webcam failed. Is the vision server running with ffmpeg?"
+      );
+    } finally {
+      webcamBtn.removeAttribute("disabled");
+    }
+  });
 
   saveBtn?.addEventListener("click", async () => {
     const host = ipInput.value.trim();
@@ -113,6 +142,27 @@ export function bindCameraPanel(
   });
 
   testBtn?.addEventListener("click", async () => {
+    if (controls.isUsingDevWebcam?.()) {
+      setStatus("Testing laptop webcam…");
+      testBtn.setAttribute("disabled", "");
+
+      try {
+        const ok = await controls.testCamera();
+        setStatus(
+          ok
+            ? "Laptop webcam reachable — frame captured."
+            : "Webcam did not return a valid image."
+        );
+      } catch (error) {
+        setStatus(
+          error instanceof Error ? error.message : "Webcam test failed."
+        );
+      } finally {
+        testBtn.removeAttribute("disabled");
+      }
+      return;
+    }
+
     const host = ipInput.value.trim();
     if (!host) {
       setStatus("Enter a camera IP before testing.");

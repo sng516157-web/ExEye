@@ -72,7 +72,10 @@ async function bootstrap(): Promise<void> {
   }
 
   const camera = createCameraSource();
-  const vision = new VisionClient(EXEYE_CONFIG.visionEndpoint);
+  const vision = new VisionClient(
+    EXEYE_CONFIG.visionEndpoint,
+    EXEYE_CONFIG.textPromptEndpoint
+  );
   const display = createDisplayAdapter(root);
   const app = await startWithFallback(root, camera, vision, display);
 

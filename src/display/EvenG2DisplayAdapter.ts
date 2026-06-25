@@ -71,6 +71,8 @@ export class EvenG2DisplayAdapter implements DisplayAdapter {
   private handlers?: DisplayControls;
   private imageQueue: Promise<void> = Promise.resolve();
   private statusContent = "";
+  private viewfinderLayout?: ViewfinderLayout;
+  private viewfinderPageReady = false;
 
   constructor(private readonly phoneRoot?: HTMLElement) {}
 
@@ -179,18 +181,28 @@ export class EvenG2DisplayAdapter implements DisplayAdapter {
       return;
     }
 
-    const page = buildPageContainers(this.statusContent, layout);
-    const rebuilt = await this.bridge.rebuildPageContainer(
-      new RebuildPageContainer({
-        containerTotalNum: 4,
-        textObject: page.textObject,
-        imageObject: page.imageObject,
-      })
-    );
+    const layoutUnchanged =
+      this.viewfinderPageReady &&
+      this.viewfinderLayout &&
+      viewfinderLayoutMatches(this.viewfinderLayout, layout);
 
-    if (!rebuilt) {
-      console.warn("[ExEye] G2 viewfinder page rebuild failed");
-      return;
+    if (!layoutUnchanged) {
+      const page = buildPageContainers(this.statusContent, layout);
+      const rebuilt = await this.bridge.rebuildPageContainer(
+        new RebuildPageContainer({
+          containerTotalNum: 4,
+          textObject: page.textObject,
+          imageObject: page.imageObject,
+        })
+      );
+
+      if (!rebuilt) {
+        console.warn("[ExEye] G2 viewfinder page rebuild failed");
+        return;
+      }
+
+      this.viewfinderLayout = layout;
+      this.viewfinderPageReady = true;
     }
 
     this.imageQueue = this.imageQueue.then(async () => {
@@ -377,6 +389,18 @@ function buildPageContainers(
     textObject: [status, vfLabel, vfFrame],
     imageObject: [vfImage],
   };
+}
+
+function viewfinderLayoutMatches(
+  a: ViewfinderLayout,
+  b: ViewfinderLayout
+): boolean {
+  return (
+    a.image.width === b.image.width &&
+    a.image.height === b.image.height &&
+    a.frame.width === b.frame.width &&
+    a.frame.height === b.frame.height
+  );
 }
 
 function phoneStatusLabel(phase: DisplayPhase): string {

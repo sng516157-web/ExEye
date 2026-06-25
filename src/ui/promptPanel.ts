@@ -6,7 +6,7 @@ export const PROMPT_PANEL_HTML = `
       Custom prompt
     </label>
     <p class="exeye-prompt-hint">
-      Tap temple/ring to speak a prompt, or type one and use Analyse / Speak below.
+      Camera runs only for visual questions; other prompts go to AI without the camera.
     </p>
     <textarea
       id="exeye-prompt"

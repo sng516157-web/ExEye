@@ -5,7 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 5173",
+    "dev:api": "npm run dev --prefix server",
+    "dev:stack": "concurrently -k -n web,api -c cyan,green \"npm run dev\" \"npm run dev:api\"",
     "dev:device": "node scripts/print-device-hint.mjs && cross-env EXEYE_DEVICE_HTTP=1 vite --host 0.0.0.0 --port 5173",
+    "dev:stack:device": "node scripts/print-device-hint.mjs && concurrently -k -n web,api -c cyan,green \"cross-env EXEYE_DEVICE_HTTP=1 vite --host 0.0.0.0 --port 5173\" \"npm run dev:api\"",
     "build": "tsc && vite build",
     "preview": "vite preview --host 0.0.0.0 --port 5173",
     "simulator": "evenhub-simulator https://localhost:5173",
@@ -24,6 +27,7 @@
     "@evenrealities/evenhub-simulator": "^0.7.3",
     "@vitejs/plugin-basic-ssl": "^2.3.0",
     "cross-env": "^10.1.0",
+    "concurrently": "^9.2.1",
     "typescript": "^5.9.3",
     "vite": "^7.3.1"
   }

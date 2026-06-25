@@ -20,8 +20,7 @@ export const VF_IMAGE_MAX = { width: 244, height: 144 } as const;
 export const G2_MODE_PREFIX = "ExEye ·";
 export const G2_VF_LABEL = "ExEye View Finder";
 
-export const G2_VF_PLACEHOLDER =
-  "View Finder: The view finder window is marked with an always showing rectangle. Once there is an image from camera, it persists in the view finder until the user sends another prompt.";
+export const G2_VF_PLACEHOLDER = "Camera frame appears here when you analyse.";
 
 export const G2_STATUS_WRAP_WIDTH = 30;
 

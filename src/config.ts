@@ -97,6 +97,12 @@ export const EXEYE_CONFIG = {
     "https://api.yourdomain.com/analyse-frame"
   ),
 
+  textPromptEndpoint: resolveEndpoint(
+    "VITE_TEXT_PROMPT_ENDPOINT",
+    "/analyse-prompt",
+    "https://api.yourdomain.com/analyse-prompt"
+  ),
+
   speechEndpoint: resolveEndpoint(
     "VITE_SPEECH_ENDPOINT",
     "/transcribe-prompt",

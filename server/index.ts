@@ -6,10 +6,12 @@ import { resolve } from "node:path";
 import { captureWebcamJpeg } from "./webcamCapture.js";
 import { discoverEsp32Camera } from "./cameraDiscover.js";
 import { augmentVisionPrompt, stripMarkdownFormatting } from "./prompt.js";
-import { resolveSttProvider, transcribeAudio } from "./stt.js";
+import { resolveSttProvider, resolveSttFallbackChain, transcribeAudio } from "./stt.js";
 import {
   analyseImage,
+  analysePrompt,
   mockSummary,
+  mockTextResponse,
   resolveVisionConfig,
   shortenErrorMessage,
 } from "./vision.js";
@@ -28,6 +30,7 @@ const DEFAULT_PROMPT =
   "Describe only useful navigation-relevant visual information in 2–3 short sentences.";
 
 app.use(cors());
+app.use(express.json({ limit: "64kb" }));
 
 app.get("/health", (_req, res) => {
   res.json({
@@ -36,6 +39,9 @@ app.get("/health", (_req, res) => {
     model: visionConfig.model,
     visionFallback: visionConfig.fallback?.provider ?? null,
     speech: resolveSttProvider(),
+    speechFallback: resolveSttFallbackChain().filter(
+      (provider) => provider !== resolveSttProvider()
+    ),
     macCamera: "/camera/snapshot",
   });
 });
@@ -122,6 +128,43 @@ app.post("/transcribe-prompt", upload.single("audio"), async (req, res) => {
   }
 });
 
+app.post("/analyse-prompt", async (req, res) => {
+  const prompt = augmentVisionPrompt(
+    typeof req.body?.prompt === "string" && req.body.prompt.trim()
+      ? req.body.prompt.trim()
+      : DEFAULT_PROMPT
+  );
+
+  try {
+    let summary: string;
+
+    if (visionConfig.provider === "mock") {
+      summary = mockTextResponse();
+    } else {
+      try {
+        summary = await analysePrompt(visionConfig, prompt);
+      } catch (error) {
+        console.error(`[ExEye] ${visionConfig.provider} text failed`, error);
+
+        if (MOCK_ON_AI_ERROR) {
+          summary = mockTextResponse();
+        } else {
+          throw error;
+        }
+      }
+    }
+
+    res.json({ summary: stripMarkdownFormatting(summary) });
+  } catch (error) {
+    console.error("[ExEye] analyse-prompt failed", error);
+    const message =
+      error instanceof Error ? error.message : "Text analysis failed";
+    res.status(500).json({
+      error: shortenErrorMessage(message),
+    });
+  }
+});
+
 app.post("/analyse-frame", upload.single("image"), async (req, res) => {
   if (!req.file) {
     res.status(400).json({ error: "Missing image upload" });
@@ -180,6 +223,11 @@ app.listen(PORT, () => {
     }${fallback}`
   );
   console.log(`Speech: ${resolveSttProvider()} at POST /transcribe-prompt`);
+  console.log(`Text: ${visionConfig.provider} at POST /analyse-prompt`);
+  const sttFallback = resolveSttFallbackChain().slice(1);
+  if (sttFallback.length) {
+    console.log(`Speech fallback: ${sttFallback.join(" → ")}`);
+  }
 
   if (
     visionConfig.provider !== "openai" &&

@@ -15,7 +15,7 @@ export class HttpCameraSource implements CameraSource {
   }
 
   async captureFrame(): Promise<Blob> {
-    const response = await fetch(resolveCameraFetchUrl(this.url), {
+    const response = await fetch(withCacheBust(resolveCameraFetchUrl(this.url)), {
       method: "GET",
       cache: "no-store",
     });
@@ -54,4 +54,18 @@ function resolveCameraFetchUrl(cameraUrl: string): string {
   }
 
   return fetchUrl;
+}
+
+function withCacheBust(url: string): string {
+  try {
+    const parsed = new URL(
+      url,
+      typeof window !== "undefined" ? window.location.origin : "http://localhost"
+    );
+    parsed.searchParams.set("t", String(Date.now()));
+    return parsed.toString();
+  } catch {
+    const joiner = url.includes("?") ? "&" : "?";
+    return `${url}${joiner}t=${Date.now()}`;
+  }
 }

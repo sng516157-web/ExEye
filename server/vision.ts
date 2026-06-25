@@ -102,9 +102,69 @@ export function mockSummary(): string {
   return "Mock vision: clear path ahead. Object detected on the left.";
 }
 
+export function mockTextResponse(): string {
+  return "Mock AI: ask me anything — no camera needed for this reply.";
+}
+
+function groqTextModel(): string {
+  return (
+    process.env.GROQ_TEXT_MODEL?.trim() || "llama-3.3-70b-versatile"
+  );
+}
+
+function openaiTextModel(): string {
+  return process.env.OPENAI_TEXT_MODEL?.trim() || "gpt-4o-mini";
+}
+
+export async function analysePrompt(
+  config: VisionConfig,
+  prompt: string
+): Promise<string> {
+  switch (config.provider) {
+    case "groq":
+      try {
+        return await completeWithGroq(prompt, groqTextModel());
+      } catch (error) {
+        if (config.fallback?.provider === "gemini") {
+          console.error(
+            "[ExEye] Groq text failed, falling back to Gemini",
+            error
+          );
+          return completeWithGemini(prompt, config.fallback.model);
+        }
+        throw error;
+      }
+    case "gemini":
+      return completeWithGemini(prompt, config.model!);
+    case "ollama":
+      return completeWithOllama(prompt, config.model!);
+    case "openai":
+      return completeWithOpenAI(prompt, openaiTextModel());
+    case "mock":
+    default:
+      return mockTextResponse();
+  }
+}
+
 export function shortenErrorMessage(message: string): string {
   if (message.includes("insufficient_quota")) {
     return "OpenAI billing/quota issue. Remove OPENAI_API_KEY and use Gemini or Ollama.";
+  }
+
+  if (
+    message.includes("CONNECT_TIMEOUT") ||
+    message.includes("UND_ERR_CONNECT_TIMEOUT") ||
+    message.includes("fetch failed")
+  ) {
+    return "Speech API network timeout. Server retries and falls back to Gemini if configured.";
+  }
+
+  if (message.includes("Gemini STT error 429") || message.includes("RESOURCE_EXHAUSTED")) {
+    return "Gemini speech rate limit. Wait ~1 min or use Groq STT (GROQ_API_KEY in server/.env).";
+  }
+
+  if (message.includes("STT error 429")) {
+    return "Speech API rate limit. Wait a moment and try again.";
   }
 
   if (message.includes("Gemini error 429") || message.includes("RESOURCE_EXHAUSTED")) {
@@ -329,6 +389,168 @@ async function analyseWithOpenAI(
           ],
         },
       ],
+    }),
+  });
+
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`OpenAI error ${response.status}: ${detail}`);
+  }
+
+  const data = (await response.json()) as {
+    choices?: Array<{ message?: { content?: string } }>;
+  };
+
+  const summary = data.choices?.[0]?.message?.content?.trim();
+
+  if (!summary) {
+    throw new Error("OpenAI returned empty summary");
+  }
+
+  return summary;
+}
+
+async function completeWithGroq(
+  prompt: string,
+  model: string
+): Promise<string> {
+  const apiKey = process.env.GROQ_API_KEY?.trim();
+  if (!apiKey) {
+    throw new Error("GROQ_API_KEY is not set");
+  }
+
+  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: 1024,
+      temperature: 0.4,
+      messages: [{ role: "user", content: prompt }],
+    }),
+  });
+
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Groq error ${response.status}: ${detail}`);
+  }
+
+  const data = (await response.json()) as {
+    choices?: Array<{ message?: { content?: string } }>;
+  };
+
+  const summary = data.choices?.[0]?.message?.content?.trim();
+
+  if (!summary) {
+    throw new Error("Groq returned empty summary");
+  }
+
+  return summary;
+}
+
+async function completeWithGemini(
+  prompt: string,
+  model: string
+): Promise<string> {
+  const apiKey = process.env.GEMINI_API_KEY?.trim();
+  if (!apiKey) {
+    throw new Error("GEMINI_API_KEY is not set");
+  }
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: {
+        maxOutputTokens: 1024,
+        temperature: 0.4,
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Gemini error ${response.status}: ${detail}`);
+  }
+
+  const data = (await response.json()) as {
+    candidates?: Array<{
+      content?: { parts?: Array<{ text?: string }> };
+    }>;
+  };
+
+  const summary = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+
+  if (!summary) {
+    throw new Error("Gemini returned empty summary");
+  }
+
+  return summary;
+}
+
+async function completeWithOllama(
+  prompt: string,
+  model: string
+): Promise<string> {
+  const baseUrl =
+    process.env.OLLAMA_URL?.trim() || "http://127.0.0.1:11434";
+
+  const response = await fetch(`${baseUrl}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model,
+      stream: false,
+      messages: [{ role: "user", content: prompt }],
+    }),
+  });
+
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(
+      `Ollama error ${response.status}. Is Ollama running? Try: ollama pull ${model}. ${detail}`
+    );
+  }
+
+  const data = (await response.json()) as {
+    message?: { content?: string };
+  };
+
+  const summary = data.message?.content?.trim();
+
+  if (!summary) {
+    throw new Error("Ollama returned empty summary");
+  }
+
+  return summary;
+}
+
+async function completeWithOpenAI(
+  prompt: string,
+  model: string
+): Promise<string> {
+  const apiKey = process.env.OPENAI_API_KEY?.trim();
+  if (!apiKey) {
+    throw new Error("OPENAI_API_KEY is not set");
+  }
+
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: 1024,
+      temperature: 0.4,
+      messages: [{ role: "user", content: prompt }],
     }),
   });
 
